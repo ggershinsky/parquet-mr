@@ -24,11 +24,18 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.io.Closeables;
 import org.apache.avro.Schema;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.cli.BaseCommand;
 import org.apache.parquet.cli.util.Expressions;
+import org.apache.parquet.crypto.DecryptionSetup;
+import org.apache.parquet.crypto.IntegerKeyIdRetriever;
+import org.apache.parquet.crypto.ParquetEncryptionFactory;
+import org.apache.parquet.crypto.ParquetFileDecryptor;
 import org.slf4j.Logger;
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
 import static org.apache.parquet.cli.util.Expressions.select;
@@ -47,6 +54,14 @@ public class CatCommand extends BaseCommand {
       names = {"-c", "--column", "--columns"},
       description = "List of columns")
   List<String> columns;
+  
+  @Parameter(names={"-e", "--encrypted-file"},
+      description="Cat an encrypted Parquet file")
+  boolean encrypt = false;
+  
+  @Parameter(names={"--key"},
+      description="Encryption key (base64 string)")
+  String encodedKey;
 
   public CatCommand(Logger console, long defaultNumRecords) {
     super(console);
@@ -62,11 +77,43 @@ public class CatCommand extends BaseCommand {
         "Only one file can be given");
 
     final String source = sourceFiles.get(0);
+    
+    ParquetFileDecryptor fileDecryptor = null;
+    if (encrypt) {
+      byte[] keyBytes;
+      if (null == encodedKey) {
+        keyBytes = new byte[16];
+        for (byte i=0; i < 16; i++) {keyBytes[i] = i;}
+        String sampleKey = Base64.getEncoder().encodeToString(keyBytes);
+        console.info("Decrypting with a sample key: " +sampleKey);
+      }
+      else {
+        keyBytes = Base64.getDecoder().decode(encodedKey);
+      }
+      
+      IntegerKeyIdRetriever kr = new IntegerKeyIdRetriever();
+      kr.putKey(12, keyBytes);
+      
+      byte[] colKeyBytes = new byte[16]; 
+      for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      kr.putKey(15, colKeyBytes);
+      
+      DecryptionSetup dSetup = new DecryptionSetup(kr);
+      
+      byte[] aad = source.getBytes(StandardCharsets.UTF_8);
+      console.info("AAD: "+source+". Len: "+aad.length);
+      dSetup.setAAD(aad); 
+ 
+      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
+      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
+    }
+    
+    Configuration conf = getConf();
 
-    Schema schema = getAvroSchema(source);
+    Schema schema = getAvroSchema(source, fileDecryptor);
     Schema projection = Expressions.filterSchema(schema, columns);
 
-    Iterable<Object> reader = openDataFile(source, projection);
+    Iterable<Object> reader = openDataFile(source, projection, fileDecryptor);
     boolean threw = true;
     long count = 0;
     try {

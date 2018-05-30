@@ -43,6 +43,7 @@ import org.apache.parquet.cli.util.Formats;
 import org.apache.parquet.cli.util.GetClassLoader;
 import org.apache.parquet.cli.util.Schemas;
 import org.apache.parquet.cli.util.SeekableFSDataInputStream;
+import org.apache.parquet.crypto.ParquetFileDecryptor;
 import org.apache.parquet.hadoop.ParquetReader;
 import org.slf4j.Logger;
 import java.io.File;
@@ -302,6 +303,11 @@ public abstract class BaseCommand implements Command, Configurable {
 
   protected <D> Iterable<D> openDataFile(final String source, Schema projection)
       throws IOException {
+    return openDataFile(source, projection, (ParquetFileDecryptor) null);
+  }
+
+  protected <D> Iterable<D> openDataFile(final String source, Schema projection, ParquetFileDecryptor fileDecryptor)
+      throws IOException {
     Formats.Format format = Formats.detectFormat(open(source));
     switch (format) {
       case PARQUET:
@@ -312,6 +318,7 @@ public abstract class BaseCommand implements Command, Configurable {
         final ParquetReader<D> parquet = AvroParquetReader.<D>builder(qualifiedPath(source))
             .disableCompatibility()
             .withDataModel(GenericData.get())
+            .withDecryptor(fileDecryptor)
             .withConf(conf)
             .build();
         return new Iterable<D>() {
@@ -373,6 +380,10 @@ public abstract class BaseCommand implements Command, Configurable {
   }
 
   protected Schema getAvroSchema(String source) throws IOException {
+    return getAvroSchema(source, (ParquetFileDecryptor) null);
+  }
+  
+  protected Schema getAvroSchema(String source, ParquetFileDecryptor fileDecryptor) throws IOException {
     Formats.Format format;
     try (SeekableInput in = openSeekable(source)) {
       format = Formats.detectFormat((InputStream) in);
@@ -380,7 +391,7 @@ public abstract class BaseCommand implements Command, Configurable {
 
       switch (format) {
         case PARQUET:
-          return Schemas.fromParquet(getConf(), qualifiedURI(source));
+          return Schemas.fromParquet(getConf(), qualifiedURI(source), fileDecryptor);
         case AVRO:
           return Schemas.fromAvro(open(source));
         case TEXT:

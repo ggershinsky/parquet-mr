@@ -27,6 +27,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import org.apache.parquet.cli.commands.CSVSchemaCommand;
 import org.apache.parquet.cli.commands.CatCommand;
+import org.apache.parquet.cli.commands.CatCommandCompare;
 import org.apache.parquet.cli.commands.CheckParquet251Command;
 import org.apache.parquet.cli.commands.ConvertCSVCommand;
 import org.apache.parquet.cli.commands.ConvertCommand;
@@ -86,6 +87,7 @@ public class Main extends Configured implements Tool {
     jc.addCommand("convert", new ConvertCommand(console));
     jc.addCommand("to-avro", new ToAvroCommand(console));
     jc.addCommand("cat", new CatCommand(console, 0));
+    jc.addCommand("catc", new CatCommandCompare(console, 0)); //TODO remove
     jc.addCommand("head", new CatCommand(console, 10));
   }
 

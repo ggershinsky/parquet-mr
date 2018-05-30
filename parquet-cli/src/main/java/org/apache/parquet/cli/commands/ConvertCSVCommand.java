@@ -29,8 +29,14 @@ import org.apache.parquet.cli.csv.AvroCSVReader;
 import org.apache.parquet.cli.csv.CSVProperties;
 import org.apache.parquet.cli.csv.AvroCSV;
 import org.apache.parquet.cli.util.Schemas;
+import org.apache.parquet.crypto.ColumnMetadata;
+import org.apache.parquet.crypto.EncryptionAlgorithmName;
+import org.apache.parquet.crypto.EncryptionSetup;
+import org.apache.parquet.crypto.ParquetEncryptionFactory;
+import org.apache.parquet.crypto.ParquetFileEncryptor;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.avro.AvroParquetWriter;
 import org.apache.parquet.cli.util.Codecs;
 import org.apache.parquet.hadoop.ParquetFileWriter;
@@ -40,6 +46,9 @@ import org.slf4j.Logger;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 
@@ -116,6 +125,14 @@ public class ConvertCSVCommand extends BaseCommand {
       names={"--overwrite"},
       description="Remove any data already in the target view or dataset")
   boolean overwrite = false;
+  
+  @Parameter(names={"-e", "--encrypted-file"},
+      description="Convert to an encrypted Parquet file")
+  boolean encrypt = false;
+  
+  @Parameter(names={"--key"},
+      description="Encryption key (base64 string)")
+  String encodedKey;
 
   @Override
   @SuppressWarnings("unchecked")
@@ -160,6 +177,47 @@ public class ConvertCSVCommand extends BaseCommand {
       csvSchema = AvroCSV.inferNullableSchema(
           recordName, open(source), props, required);
     }
+    
+    ParquetFileEncryptor fileEncryptor = null;
+    if (encrypt) {
+      byte[] keyBytes;
+      if (null == encodedKey) {
+        keyBytes = new byte[16];
+        for (byte i=0; i < 16; i++) {keyBytes[i] = i;}
+        encodedKey = Base64.getEncoder().encodeToString(keyBytes);
+        console.info("Encrypting with a sample key: " +encodedKey);
+      }
+      else {
+        keyBytes = Base64.getDecoder().decode(encodedKey);
+      }
+      
+      EncryptionSetup eSetup = new EncryptionSetup(EncryptionAlgorithmName.AES_GCM_CTR_V1, keyBytes, 12);
+      
+      ColumnMetadata encCol = new ColumnMetadata(true, "pageRank");
+      
+      byte[] colKeyBytes = new byte[16]; 
+      for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      encCol.setEncryptionKey(colKeyBytes, 15);
+      
+      ArrayList<ColumnMetadata> columnMD = new ArrayList<ColumnMetadata>();
+      columnMD.add(encCol);
+      
+      eSetup.setColumnMetadata(columnMD, false);
+      
+      byte[] aad = outputPath.getBytes(StandardCharsets.UTF_8);
+      console.info("AAD: "+outputPath+". Len: "+aad.length);
+      eSetup.setAAD(aad);
+ 
+      try {
+        //fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(keyBytes);
+        fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(eSetup);
+      } catch (IOException e) {
+        throw new RuntimeException("Failed to create encryptor", e);
+      } 
+    }
+    
+    Configuration conf = getConf();
+//    conf.set(ParquetWriter.ENCRYPTION_KEY_PARAMETER_NAME, encodedKey);
 
     long count = 0;
     try (AvroCSVReader<Record> reader = new AvroCSVReader<>(
@@ -170,6 +228,7 @@ public class ConvertCSVCommand extends BaseCommand {
           .withWriterVersion(v2 ? PARQUET_2_0 : PARQUET_1_0)
           .withWriteMode(overwrite ?
               ParquetFileWriter.Mode.OVERWRITE : ParquetFileWriter.Mode.CREATE)
+          .withEncryptor(fileEncryptor)
           .withCompressionCodec(codec)
           .withDictionaryEncoding(true)
           .withDictionaryPageSize(dictionaryPageSize)
