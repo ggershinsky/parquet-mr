@@ -40,7 +40,7 @@ public class ParquetFileDecryptor {
 
   private BlockCrypto.Decryptor aesGcmBlockDecryptor;
   private BlockCrypto.Decryptor aesCtrBlockDecryptor;
-  private byte[] fileKeyBytes;
+  private byte[] footerKeyBytes;
   private boolean fileCryptoMDSet = false;
   private boolean uniformEncryption = false;
   private List<ColumnCryptoMetaData> columnMDList;
@@ -53,14 +53,9 @@ public class ParquetFileDecryptor {
   
   ParquetFileDecryptor(DecryptionSetup dSetup) throws IOException {
     this.dSetup= dSetup;
-    fileKeyBytes = dSetup.getKeyBytes();
-    if (null != fileKeyBytes) {
-      if (! (fileKeyBytes.length == 16 || fileKeyBytes.length == 24 || fileKeyBytes.length == 32)) {
-        throw new IOException("Wrong key length "+fileKeyBytes.length);
-      }
-    }
+    footerKeyBytes = dSetup.getFooterKeyBytes();
     keyRetriever = dSetup.getKeyRetriever();
-    if ((null != fileKeyBytes) && (null != keyRetriever)) {
+    if ((null != footerKeyBytes) && (null != keyRetriever)) {
       throw new IOException("Can't set both explicit key and key retriever");
     }
     aadBytes = dSetup.getAAD();
@@ -69,27 +64,27 @@ public class ParquetFileDecryptor {
     } catch (GeneralSecurityException e) {
       throw new IOException("Failed to get cipher", e);
     }
-    LOG.info("File decryptor. Explicit key: {}. Key retriever: {}", 
-        (null != fileKeyBytes), (null != keyRetriever));
+    LOG.info("File decryptor. Explicit footer key: {}. Key retriever: {}", 
+        (null != footerKeyBytes), (null != keyRetriever));
   }
   
-  // Returns two decryptors - for page headers, and for page contents (can be the same)
   // TODO optimize: store in a list/map
-  public synchronized BlockCrypto.Decryptor[] getColumnDecryptors(String[] path) throws IOException {
+  public synchronized ColumnDecryptors getColumnDecryptors(String[] path) throws IOException {
     if (!fileCryptoMDSet) {
       throw new IOException("Haven't parsed the footer yet");
     }
-    BlockCrypto.Decryptor[] decryptors = new BlockCrypto.Decryptor[2];
+    ColumnDecryptors decryptors = new ColumnDecryptors();
     //Uniform encryption means footer and all columns are encrypted, with same key
     if (uniformEncryption)  {
-      if (null == aesGcmBlockDecryptor) aesGcmBlockDecryptor = new AesGcmDecryptor(fileKeyBytes, aadBytes);
-      decryptors[0] = aesGcmBlockDecryptor;
+      decryptors.status = ColumnDecryptors.Status.KEY_AVAILABLE;
+      if (null == aesGcmBlockDecryptor) aesGcmBlockDecryptor = new AesGcmDecryptor(footerKeyBytes, aadBytes);
+      decryptors.metadataDecryptor = aesGcmBlockDecryptor;
       if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
-        if (null == aesCtrBlockDecryptor) aesCtrBlockDecryptor = new AesCtrDecryptor(fileKeyBytes);
-        decryptors[1] = aesCtrBlockDecryptor;
+        if (null == aesCtrBlockDecryptor) aesCtrBlockDecryptor = new AesCtrDecryptor(footerKeyBytes);
+        decryptors.dataDecryptor = aesCtrBlockDecryptor;
       }
       else {
-        decryptors[1] = aesGcmBlockDecryptor;
+        decryptors.dataDecryptor = aesGcmBlockDecryptor;
       }
       return decryptors;
     }
@@ -107,25 +102,32 @@ public class ParquetFileDecryptor {
         if (null == keyRetriever)  throw new IOException("No column key or key retriever");
         columnKeyBytes = keyRetriever.getKey(ccmd.getKey_metadata()); 
       }
-      if (null == columnKeyBytes) throw new IOException("Column decryption key unavailable");
-      decryptors[0] = new AesGcmDecryptor(columnKeyBytes, aadBytes);
+      if (null == columnKeyBytes) {
+        if (LOG.isDebugEnabled()) LOG.debug("Column {} is encrypted, but key unavailable", Arrays.toString(path));
+        decryptors.status = ColumnDecryptors.Status.KEY_UNAVAILABLE;
+        return decryptors;
+      }
+      decryptors.status = ColumnDecryptors.Status.KEY_AVAILABLE;
+      decryptors.metadataDecryptor = new AesGcmDecryptor(columnKeyBytes, aadBytes);
       if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
-        decryptors[1] = new AesCtrDecryptor(columnKeyBytes);
+        decryptors.dataDecryptor = new AesCtrDecryptor(columnKeyBytes);
       }
       else {
-        decryptors[1] = decryptors[0];
+        decryptors.dataDecryptor = decryptors.metadataDecryptor;
       }
-      return decryptors;
     }
     else {
       if (LOG.isDebugEnabled()) LOG.debug("Column {} is not encrypted", Arrays.toString(path));
-      return null;
+      decryptors.status = ColumnDecryptors.Status.PLAINTEXT;
     }
+    
+    return decryptors;
   }
 
   public synchronized BlockCrypto.Decryptor getFooterDecryptor() throws IOException {
     if (!fileCryptoMDSet) 
       throw new IOException("Haven't parsed the file crypto metadata yet");
+    if (!footerEncrypted) return null;
     return aesGcmBlockDecryptor;
   }
 
@@ -141,17 +143,17 @@ public class ParquetFileDecryptor {
       footerEncrypted = fcmd.isEncrypted_footer();
       
       // ignore key metadata if key is explicitly set via API
-      if (null == fileKeyBytes) { 
+      if (footerEncrypted && (null == footerKeyBytes)) { 
         if (fcmd.isSetKey_metadata()) {
           byte[] key_meta_data = fcmd.getKey_metadata();
           if (null == keyRetriever) throw new IOException("No footer key or key retriever");
-          fileKeyBytes = keyRetriever.getKey(key_meta_data);
+          footerKeyBytes = keyRetriever.getKey(key_meta_data);
         }
       }
-      if (footerEncrypted && (null == fileKeyBytes)) {
+      if (footerEncrypted && (null == footerKeyBytes)) {
         throw new IOException("Footer decryption key unavailable");
       }
-      aesGcmBlockDecryptor = new AesGcmDecryptor(fileKeyBytes, aadBytes);
+      if  (footerEncrypted) aesGcmBlockDecryptor = new AesGcmDecryptor(footerKeyBytes, aadBytes);
       if (fcmd.isSetColumn_crypto_meta_data()) {
         columnMDList = fcmd.getColumn_crypto_meta_data();
       }
@@ -182,34 +184,15 @@ public class ParquetFileDecryptor {
       if (fcmd.isSetKey_metadata()) {
         byte[] key_meta_data = fcmd.getKey_metadata();
         byte[] key_bytes = keyRetriever.getKey(key_meta_data);
-        if (!Arrays.equals(key_bytes, fileKeyBytes)) {
-          throw new IOException("Re-use with different file key");
+        if (!Arrays.equals(key_bytes, footerKeyBytes)) {
+          throw new IOException("Re-use with different footer key");
         }
       }
     }
   }
 
-
-  // TODO optimize, get from list/map
-  public boolean decryptStats(String[] path) throws IOException {
-    if (!fileCryptoMDSet) {
-      throw new IOException("Haven't parsed the footer yet");
-    }
-    //Uniform encryption means footer and all columns are encrypted, with same key
-    if (uniformEncryption)  return false;
-    ColumnCryptoMetaData ccmd = ParquetFileEncryptor.findColumn(path, columnMDList);
-    if (null == ccmd) {
-      throw new IOException("Failed to find crypto metadata for column " + Arrays.toString(path));
-    }
-    if (!ccmd.isEncrypted()) return false;
-    if (null == fileKeyBytes) return true;
-    byte[] columnKeyBytes = dSetup.getColumnKey(path);
-    if (null == columnKeyBytes) {
-      if (null == keyRetriever)  throw new IOException("No column key or key retriever");
-      columnKeyBytes = keyRetriever.getKey(ccmd.getKey_metadata());
-    }
-    if (null == columnKeyBytes) throw new IOException("Column decryption key unavailable");
-    return !Arrays.equals(fileKeyBytes, columnKeyBytes);
+  public boolean isUniformEncryption() {
+    return uniformEncryption;
   }
 }
 

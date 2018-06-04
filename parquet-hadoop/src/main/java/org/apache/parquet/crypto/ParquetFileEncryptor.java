@@ -69,9 +69,6 @@ public class ParquetFileEncryptor {
     else {
       encryptFooter = true;
     }
-    if (! (footerKeyBytes.length == 16 || footerKeyBytes.length == 24 || footerKeyBytes.length == 32)) {
-      throw new IOException("Wrong key length "+footerKeyBytes.length);
-    }
     footerKeyMetaDataBytes = eSetup.getFooterKeyMetadata();
     if (null != footerKeyMetaDataBytes) {
       if (footerKeyMetaDataBytes.length > 256) { // TODO 
@@ -117,17 +114,17 @@ public class ParquetFileEncryptor {
   }
 
   // Returns two encryptors - for page headers, and for page contents (can be the same)
-  public synchronized BlockCrypto.Encryptor[] getColumnEncryptors(String[] columnPath) throws IOException {
-    BlockCrypto.Encryptor[] encryptors = new BlockCrypto.Encryptor[2];
+  public synchronized ColumnEncryptors getColumnEncryptors(String[] columnPath) throws IOException {
+    ColumnEncryptors encryptors = new ColumnEncryptors();
     if (uniformEncryption || singleKeyEncryption) {
       if (null == aesGcmBlockEncryptor) aesGcmBlockEncryptor = new AesGcmEncryptor(footerKeyBytes, aadBytes);
-      encryptors[0] = aesGcmBlockEncryptor;
+      encryptors.metadataEncryptor = aesGcmBlockEncryptor;
       if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
         if (null == aesCtrBlockEncryptor) aesCtrBlockEncryptor = new AesCtrEncryptor(footerKeyBytes);
-        encryptors[1] = aesCtrBlockEncryptor;
+        encryptors.dataEncryptor = aesCtrBlockEncryptor;
       }
       else {
-        encryptors[1] = aesGcmBlockEncryptor;
+        encryptors.dataEncryptor = aesGcmBlockEncryptor;
       }
     }
     if (uniformEncryption) return encryptors;
@@ -146,13 +143,13 @@ public class ParquetFileEncryptor {
       byte[] key_bytes =  cmd.getKeyBytes();
       if (null == key_bytes) key_bytes = footerKeyBytes;
       if (null == key_bytes) throw new IOException("Null key in encrypted column");
-      encryptors[0] = new AesGcmEncryptor(key_bytes, aadBytes);
+      encryptors.metadataEncryptor = new AesGcmEncryptor(key_bytes, aadBytes);
       
       if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
-        encryptors[1] = new AesCtrEncryptor(key_bytes);
+        encryptors.dataEncryptor = new AesCtrEncryptor(key_bytes);
       }
       else {
-        encryptors[1] = encryptors[0];
+        encryptors.dataEncryptor = encryptors.metadataEncryptor;
       }
       return encryptors;
     }
@@ -164,6 +161,7 @@ public class ParquetFileEncryptor {
   }
 
   public synchronized BlockCrypto.Encryptor getFooterEncryptor() throws IOException  {
+    if (!encryptFooter) return null;
     if (null == aesGcmBlockEncryptor) aesGcmBlockEncryptor = new AesGcmEncryptor(footerKeyBytes, aadBytes);
     return aesGcmBlockEncryptor;
   }
@@ -181,17 +179,13 @@ public class ParquetFileEncryptor {
     return fcmd;
   }
 
-  public boolean encryptStats(String[] columnPath) throws IOException {
-    //Uniform encryption means footer and all columns are encrypted, with same key
-    if (uniformEncryption)  return false;
-    
-    if (null == footerKeyBytes) return true;
-    
-    ColumnMetadata cmd = encryptionSetup.getColumnMetadata(columnPath);
-    if (null == cmd) {
-      throw new IOException("No encryption metadata for column " + Arrays.toString(columnPath));
-    }
-    
-    return !Arrays.equals(cmd.getKeyBytes(), footerKeyBytes);
+  //Single key means: footer and columns are encrypted with the same key. Some columns can be plaintext, but footer must be encrypted.
+//TODO: split into two: encr footer, and multiple keys
+  public boolean isSingleKeyEncryption() {
+    return singleKeyEncryption;
+  }
+
+  public boolean isUniformEncryption() {
+    return uniformEncryption;
   }
 }

@@ -60,6 +60,7 @@ import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPageReadStore;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputDecompressor;
+import org.apache.parquet.crypto.ColumnDecryptors;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileDecryptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -888,12 +889,15 @@ public class ParquetFileReader implements Closeable {
           currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages());
         }
         else {
-          BlockCrypto.Decryptor[] decryptors = fileDecryptor.getColumnDecryptors(chunk.descriptor.col.getPath());
-          if (null == decryptors) {
+          ColumnDecryptors decryptors = fileDecryptor.getColumnDecryptors(chunk.descriptor.col.getPath());
+          if (decryptors.getStatus() == ColumnDecryptors.Status.PLAINTEXT) {
             currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages());
           }
-          else {
-            currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages(decryptors[0], decryptors[1]));
+          else if (decryptors.getStatus() == ColumnDecryptors.Status.KEY_AVAILABLE) {
+            currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages(decryptors.getMetadataDecryptor(), decryptors.getDataDecryptor()));
+          }
+          else { // Key unavailable
+            //TODO Do anything?
           }
         }
       }

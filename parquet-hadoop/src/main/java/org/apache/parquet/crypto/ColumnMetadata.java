@@ -48,12 +48,14 @@ public class ColumnMetadata {
   }
   
   public void setEncryptionKey(byte[] keyBytes, byte[] keyMetaData) throws IOException {
+    // TODO if this object is read, throw an exception
     if (!encrypt) throw new IOException("Setting key on unencrypted column");
     this.keyBytes = keyBytes;
     this.keyMetaData = keyMetaData;
   }
   
   public void setEncryptionKey(byte[] keyBytes, int keyIdMetaData) throws IOException {
+    // TODO if this object is read, throw an exception
     if (!encrypt) throw new IOException("Setting key on unencrypted column");
     this.keyBytes = keyBytes;
     this.keyMetaData = BytesUtils.intToBytes(keyIdMetaData);
