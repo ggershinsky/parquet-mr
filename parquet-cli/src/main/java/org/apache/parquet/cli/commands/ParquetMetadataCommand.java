@@ -31,6 +31,10 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.EncodingStats;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.crypto.DecryptionSetup;
+import org.apache.parquet.crypto.IntegerKeyIdRetriever;
+import org.apache.parquet.crypto.ParquetEncryptionFactory;
+import org.apache.parquet.crypto.ParquetFileDecryptor;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
@@ -42,6 +46,8 @@ import org.apache.parquet.schema.PrimitiveType;
 import org.slf4j.Logger;
 import javax.annotation.Nullable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,6 +68,15 @@ public class ParquetMetadataCommand extends BaseCommand {
 
   @Parameter(description = "<parquet path>")
   List<String> targets;
+  
+  @Parameter(names={"-e", "--encrypted-file"},
+      description="Cat an encrypted Parquet file")
+  boolean encrypt = false;
+  
+  @Parameter(names={"--key"},
+      description="Encryption key (base64 string)")
+  String encodedKey;
+
 
   @Override
   @SuppressWarnings("unchecked")
@@ -72,8 +87,39 @@ public class ParquetMetadataCommand extends BaseCommand {
         "Cannot process multiple Parquet files.");
 
     String source = targets.get(0);
+    
+    ParquetFileDecryptor fileDecryptor = null;
+    if (encrypt) {
+      byte[] keyBytes;
+      if (null == encodedKey) {
+        keyBytes = new byte[16];
+        for (byte i=0; i < 16; i++) {keyBytes[i] = i;}
+        String sampleKey = Base64.getEncoder().encodeToString(keyBytes);
+        console.info("Decrypting with a sample key: " +sampleKey);
+      }
+      else {
+        keyBytes = Base64.getDecoder().decode(encodedKey);
+      }
+      
+      IntegerKeyIdRetriever kr = new IntegerKeyIdRetriever();
+      kr.putKey(12, keyBytes);
+      
+      byte[] colKeyBytes = new byte[16]; 
+      for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      //kr.putKey(15, colKeyBytes);
+      
+      DecryptionSetup dSetup = new DecryptionSetup(kr);
+      
+      byte[] aad = source.getBytes(StandardCharsets.UTF_8);
+      console.info("AAD: "+source+". Len: "+aad.length);
+      dSetup.setAAD(aad); 
+ 
+      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
+      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
+    }
+    
     ParquetMetadata footer = ParquetFileReader.readFooter(
-        getConf(), qualifiedPath(source), ParquetMetadataConverter.NO_FILTER);
+        getConf(), qualifiedPath(source), ParquetMetadataConverter.NO_FILTER, fileDecryptor);
 
     console.info("\nFile path:  {}", source);
     console.info("Created by: {}", footer.getFileMetaData().getCreatedBy());
@@ -117,18 +163,36 @@ public class ParquetMetadataCommand extends BaseCommand {
   }
 
   private void printRowGroup(Logger console, int index, BlockMetaData rowGroup, MessageType schema) {
-    long start = rowGroup.getStartingPos();
+    
+    console.info("");
+      
+    long start = -1;
+    try {
+      start = rowGroup.getStartingPos();
+    }
+    catch (RuntimeException e) { // TODO
+      console.info(String.format("First column is hidden, can't calculate starting position", index));
+    }
     long rowCount = rowGroup.getRowCount();
-    long compressedSize = rowGroup.getCompressedSize();
+    long compressedSize = -1;
+    try {
+      compressedSize = rowGroup.getCompressedSize();
+    }
+    catch (RuntimeException e) { //TODO
+      console.info(String.format("Hidden column(s), can't calculate total compressed size", index));
+    }
     long uncompressedSize = rowGroup.getTotalByteSize();
     String filePath = rowGroup.getPath();
 
-    console.info(String.format("\nRow group %d:  count: %d  %s records  start: %d  total: %s%s\n%s",
-        index, rowCount,
+    console.info(String.format("Row group %d:  start: %d count: %d. \n  Compressed  :  %s records  total: %s. \n  Uncompressed:  %s records  total: %s%s\n%s",
+        index, start, rowCount,
         humanReadable(((float) compressedSize) / rowCount),
-        start, humanReadable(compressedSize),
+        humanReadable(compressedSize),
+        humanReadable(((float) uncompressedSize) / rowCount),
+        humanReadable(uncompressedSize),
         filePath != null ? " path: " + filePath : "",
         StringUtils.leftPad("", 80, '-')));
+        
 
     int size = maxSize(Iterables.transform(rowGroup.getColumns(),
         new Function<ColumnChunkMetaData, String>() {
@@ -146,6 +210,14 @@ public class ParquetMetadataCommand extends BaseCommand {
   }
 
   private void printColumnChunk(Logger console, int width, ColumnChunkMetaData column, MessageType schema) {
+    String name = column.getPath().toDotString();
+    
+    if (column.isHiddenColumn()) {
+      console.info(String.format("%-" + (width+1) + "s %-9s %s %-7s %-9s %-10s %-7s %s", 
+          name, "HIDDEN", "-", "-", "-", "-", "-", "\"-\" / \"-\""));
+      return;
+    }
+    
     String[] path = column.getPath().toArray();
     PrimitiveType type = primitive(schema, path);
     Preconditions.checkNotNull(type);
@@ -161,8 +233,6 @@ public class ParquetMetadataCommand extends BaseCommand {
         encodingsAsString(encodings, desc) :
         encodingStatsAsString(encodingStats);
     Statistics stats = column.getStatistics();
-
-    String name = column.getPath().toDotString();
 
     PrimitiveType.PrimitiveTypeName typeName = type.getPrimitiveTypeName();
     if (typeName == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {

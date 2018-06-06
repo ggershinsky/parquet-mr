@@ -208,12 +208,8 @@ public class ConvertCSVCommand extends BaseCommand {
       console.info("AAD: "+outputPath+". Len: "+aad.length);
       eSetup.setAAD(aad);
  
-      try {
-        //fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(keyBytes);
-        fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(eSetup);
-      } catch (IOException e) {
-        throw new RuntimeException("Failed to create encryptor", e);
-      } 
+      //fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(keyBytes);
+      fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(eSetup);     
     }
     
     Configuration conf = getConf();

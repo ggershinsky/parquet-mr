@@ -980,6 +980,7 @@ public class ParquetMetadataConverter {
         blockMetaData.setTotalByteSize(rowGroup.getTotal_byte_size());
         List<ColumnChunk> columns = rowGroup.getColumns();
         String filePath = columns.get(0).getFile_path();
+        String[] columnPath = null;
         for (ColumnChunk columnChunk : columns) {
           if ((filePath == null && columnChunk.getFile_path() != null)
               || (filePath != null && !filePath.equals(columnChunk.getFile_path()))) {
@@ -994,7 +995,7 @@ public class ParquetMetadataConverter {
             metaData = columnChunk.meta_data;
           }
           else {
-            String[] columnPath = columnChunk.getPath_in_schema().toArray(new String[columnChunk.getPath_in_schema().size()]);
+            columnPath = columnChunk.getPath_in_schema().toArray(new String[columnChunk.getPath_in_schema().size()]);
             ColumnDecryptors decryptors = fileDecryptor.getColumnDecryptors(columnPath);
             if (decryptors.getStatus() != ColumnDecryptors.Status.KEY_UNAVAILABLE) {
               SeekableInputStream sis = (SeekableInputStream) from; // TODO
@@ -1009,9 +1010,10 @@ public class ParquetMetadataConverter {
               sis.seek(currentOffset); //TODO needed?
             }
           }
+          ColumnChunkMetaData column = null;
           if (null != metaData) { // unencrypted, or successfully decrypted
             ColumnPath path = getPath(metaData);
-            ColumnChunkMetaData column = ColumnChunkMetaData.get(
+            column = ColumnChunkMetaData.get(
               path,
               messageType.getType(path.toArray()).asPrimitiveType(),
               fromFormatCodec(metaData.codec),
@@ -1029,11 +1031,13 @@ public class ParquetMetadataConverter {
             // TODO
             // index_page_offset
             // key_value_metadata
-            blockMetaData.addColumn(column);
+            
           }
           else { // encrypted column, no key available
-            // TODO do anything?
+            ColumnPath path = ColumnPath.get(columnPath);
+            column = ColumnChunkMetaData.getHiddenColumn(path);
           }
+          blockMetaData.addColumn(column);
         }
         blockMetaData.setPath(filePath);
         blocks.add(blockMetaData);
