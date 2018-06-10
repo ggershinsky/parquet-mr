@@ -46,7 +46,7 @@ public class EncryptionSetup {
    * @param keyMetadata Key metadata, to be written in a file for key retrieval upon decryption. Can be null.
    * @throws IOException 
    */
-  public EncryptionSetup(EncryptionAlgorithmName algorithm, byte[] keyBytes, byte[] keyMetadata) throws IOException {
+  public EncryptionSetup(Cipher algorithm, byte[] keyBytes, byte[] keyMetadata) throws IOException {
     footerKeyBytes = keyBytes;
     footerKeyMetadata = keyMetadata;
     uniformEncryption = true;
@@ -66,7 +66,7 @@ public class EncryptionSetup {
    * @param keyId Key id - will be converted to a 4-byte metadata and written in a file for key retrieval upon decryption.
    * @throws IOException 
    */
-  public EncryptionSetup(EncryptionAlgorithmName algorithm, byte[] keyBytes, int keyId) throws IOException {
+  public EncryptionSetup(Cipher algorithm, byte[] keyBytes, int keyId) throws IOException {
     this(algorithm, keyBytes, BytesUtils.intToBytes(keyId));
   }
   
