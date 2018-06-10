@@ -96,16 +96,22 @@ public class CatCommand extends BaseCommand {
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
-      //kr.putKey(15, colKeyBytes);
+      
+      // #1
+      kr.putKey(15, colKeyBytes);
       
       DecryptionSetup dSetup = new DecryptionSetup(kr);
       
       byte[] aad = source.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+source+". Len: "+aad.length);
+      
+      // #2
       dSetup.setAAD(aad); 
  
-      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
-      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
+ 
+      // #3
+      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
+      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
     }
     
     Configuration conf = getConf();

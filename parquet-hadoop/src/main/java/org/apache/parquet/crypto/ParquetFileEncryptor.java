@@ -142,7 +142,7 @@ public class ParquetFileEncryptor {
       
       byte[] key_bytes =  cmd.getKeyBytes();
       if (null == key_bytes) key_bytes = footerKeyBytes;
-      if (null == key_bytes) throw new IOException("Null key in encrypted column");
+      if (null == key_bytes) throw new IOException("Null key in encrypted column " + Arrays.toString(columnPath));
       encryptors.metadataEncryptor = new AesGcmEncryptor(key_bytes, aadBytes);
       
       if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
@@ -168,7 +168,7 @@ public class ParquetFileEncryptor {
 
   public synchronized FileCryptoMetaData getFileCryptoMetaData(long footer_index) throws IOException {
     FileCryptoMetaData fcmd = new FileCryptoMetaData(algorithmId, encryptFooter, footer_index, uniformEncryption);
-    if (null != footerKeyMetaDataBytes) fcmd.setKey_metadata(footerKeyMetaDataBytes);
+    if (null != footerKeyMetaDataBytes) fcmd.setFooter_key_metadata(footerKeyMetaDataBytes);
     if (!uniformEncryption) {
       if (columnMDListSet) {
         throw new IOException("Re-using file encryptor with non-uniform encryption");

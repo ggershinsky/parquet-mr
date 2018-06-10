@@ -30,7 +30,7 @@ import org.apache.parquet.cli.csv.CSVProperties;
 import org.apache.parquet.cli.csv.AvroCSV;
 import org.apache.parquet.cli.util.Schemas;
 import org.apache.parquet.crypto.ColumnMetadata;
-import org.apache.parquet.crypto.EncryptionAlgorithmName;
+import org.apache.parquet.crypto.Cipher;
 import org.apache.parquet.crypto.EncryptionSetup;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileEncryptor;
@@ -191,23 +191,32 @@ public class ConvertCSVCommand extends BaseCommand {
         keyBytes = Base64.getDecoder().decode(encodedKey);
       }
       
-      EncryptionSetup eSetup = new EncryptionSetup(EncryptionAlgorithmName.AES_GCM_CTR_V1, keyBytes, 12);
+      // #1
+      //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, keyBytes, 12);
+      EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, null, null);
       
+      // #2
       ColumnMetadata encCol = new ColumnMetadata(true, "pageRank");
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      
+      // #3
       encCol.setEncryptionKey(colKeyBytes, 15);
       
       ArrayList<ColumnMetadata> columnMD = new ArrayList<ColumnMetadata>();
       columnMD.add(encCol);
       
+      // #4
       eSetup.setColumnMetadata(columnMD, false);
       
       byte[] aad = outputPath.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+outputPath+". Len: "+aad.length);
+      
+      // #5
       eSetup.setAAD(aad);
- 
+      
+      // #6
       //fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(keyBytes);
       fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(eSetup);     
     }

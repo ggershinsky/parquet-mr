@@ -106,7 +106,7 @@ public class ParquetMetadataCommand extends BaseCommand {
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
-      //kr.putKey(15, colKeyBytes);
+      kr.putKey(15, colKeyBytes);
       
       DecryptionSetup dSetup = new DecryptionSetup(kr);
       

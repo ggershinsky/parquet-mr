@@ -28,6 +28,7 @@ import org.apache.parquet.format.ColumnCryptoMetaData;
 public class ColumnMetadata {
   
   private boolean encrypt;
+  private boolean isEncryptedWithFooterKey;
   private String[] columnPath;
   private byte[] keyBytes;
   private byte[] keyMetaData;
@@ -44,21 +45,23 @@ public class ColumnMetadata {
   
   public ColumnMetadata(boolean encrypt, String[] path) {
     this.encrypt = encrypt;
-    columnPath = path;
+    this.columnPath = path;
+    this.isEncryptedWithFooterKey = encrypt;
   }
   
   public void setEncryptionKey(byte[] keyBytes, byte[] keyMetaData) throws IOException {
     // TODO if this object is read, throw an exception
-    if (!encrypt) throw new IOException("Setting key on unencrypted column");
+    if (!encrypt) throw new IOException("Setting key on unencrypted column: " + Arrays.toString(columnPath));
+    if (null == keyBytes) throw new IOException("Null key for " + Arrays.toString(columnPath));
     this.keyBytes = keyBytes;
     this.keyMetaData = keyMetaData;
+    //TODO compare to footer key?
+    this.isEncryptedWithFooterKey = false;
   }
   
   public void setEncryptionKey(byte[] keyBytes, int keyIdMetaData) throws IOException {
-    // TODO if this object is read, throw an exception
-    if (!encrypt) throw new IOException("Setting key on unencrypted column");
-    this.keyBytes = keyBytes;
-    this.keyMetaData = BytesUtils.intToBytes(keyIdMetaData);
+    byte[] metaData = BytesUtils.intToBytes(keyIdMetaData);
+    setEncryptionKey(keyBytes, metaData);
   }
 
   String[] getPath() {
@@ -71,9 +74,9 @@ public class ColumnMetadata {
   
   ColumnCryptoMetaData getColumnCryptoMetaData() {
     if (null != ccmd) return ccmd;
-    ccmd = new ColumnCryptoMetaData(Arrays.asList(columnPath), encrypt);
+    ccmd = new ColumnCryptoMetaData(Arrays.asList(columnPath), encrypt, isEncryptedWithFooterKey);
     if (null != keyMetaData) {
-      ccmd.setKey_metadata(keyMetaData);
+      ccmd.setColumn_key_metadata(keyMetaData);
     }
     return ccmd;
   }
