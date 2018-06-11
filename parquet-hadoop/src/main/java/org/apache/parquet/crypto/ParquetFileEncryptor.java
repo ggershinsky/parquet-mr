@@ -72,7 +72,7 @@ public class ParquetFileEncryptor {
     footerKeyMetaDataBytes = eSetup.getFooterKeyMetadata();
     if (null != footerKeyMetaDataBytes) {
       if (footerKeyMetaDataBytes.length > 256) { // TODO 
-        throw new IOException("Key MetaData is too long "+footerKeyMetaDataBytes.length);
+        throw new IOException("Footer key MetaData is too long " + footerKeyMetaDataBytes.length);
       }
     }
     columnMDListSet = false;
@@ -127,8 +127,8 @@ public class ParquetFileEncryptor {
         encryptors.dataEncryptor = aesGcmBlockEncryptor;
       }
     }
-    if (uniformEncryption) return encryptors;
-    
+    if (uniformEncryption) return encryptors;    
+    // TODO optimize (store in a map, retrieve by path)? Called up to twice per file (?)
     ColumnMetadata cmd = encryptionSetup.getColumnMetadata(columnPath);
     if (null == cmd) {
       throw new IOException("No encryption metadata for column " + Arrays.toString(columnPath));
@@ -136,28 +136,23 @@ public class ParquetFileEncryptor {
     if (null == findColumn(columnPath, columnMDList)) {
       columnMDList.add(cmd.getColumnCryptoMetaData());
     }
-    if (cmd.isEncrypted()) {
-      // TODO if encrypt is always true, set uniformEncryption = true for single key encryption
-      if (singleKeyEncryption) return encryptors;
-      
-      byte[] key_bytes =  cmd.getKeyBytes();
-      if (null == key_bytes) key_bytes = footerKeyBytes;
-      if (null == key_bytes) throw new IOException("Null key in encrypted column " + Arrays.toString(columnPath));
-      encryptors.metadataEncryptor = new AesGcmEncryptor(key_bytes, aadBytes);
-      
-      if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
-        encryptors.dataEncryptor = new AesCtrEncryptor(key_bytes);
-      }
-      else {
-        encryptors.dataEncryptor = encryptors.metadataEncryptor;
-      }
-      return encryptors;
-    }
-    else {
+    if (!cmd.isEncrypted()) {
       if (LOG.isDebugEnabled()) LOG.debug("Column {} is not encrypted", Arrays.toString(columnPath));
-      // TODO check is no column is encrypted, and footer is not encrypted
       return null;
     }
+    if (singleKeyEncryption) return encryptors;
+    byte[] key_bytes =  cmd.getKeyBytes();
+    // If column key not specified, encrypt with footer key
+    if (null == key_bytes) key_bytes = footerKeyBytes;
+    if (null == key_bytes) throw new IOException("Null key in encrypted column " + Arrays.toString(columnPath));
+    encryptors.metadataEncryptor = new AesGcmEncryptor(key_bytes, aadBytes);
+    if (EncryptionAlgorithm.AES_GCM_CTR_V1 == algorithmId) {
+      encryptors.dataEncryptor = new AesCtrEncryptor(key_bytes);
+    }
+    else {
+      encryptors.dataEncryptor = encryptors.metadataEncryptor;
+    }
+    return encryptors;
   }
 
   public synchronized BlockCrypto.Encryptor getFooterEncryptor() throws IOException  {
@@ -177,12 +172,6 @@ public class ParquetFileEncryptor {
       columnMDListSet = true;      
     }
     return fcmd;
-  }
-
-  //Single key means: footer and columns are encrypted with the same key. Some columns can be plaintext, but footer must be encrypted.
-//TODO: split into two: encr footer, and multiple keys
-  public boolean isSingleKeyEncryption() {
-    return singleKeyEncryption;
   }
 
   public boolean isUniformEncryption() {

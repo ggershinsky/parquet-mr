@@ -41,7 +41,6 @@ public class ParquetFileDecryptor {
   private BlockCrypto.Decryptor aesGcmBlockDecryptor;
   private BlockCrypto.Decryptor aesCtrBlockDecryptor;
   private byte[] footerKeyBytes;
-  private boolean fileCryptoMDSet = false;
   private boolean uniformEncryption = false;
   private List<ColumnCryptoMetaData> columnMDList;
   private EncryptionAlgorithm algorithmId;
@@ -49,6 +48,7 @@ public class ParquetFileDecryptor {
   private byte[] aadBytes;
   private boolean footerEncrypted;
   private DecryptionSetup dSetup;
+  private boolean fileCryptoMDSet = false;
   
   
   ParquetFileDecryptor(DecryptionSetup dSetup) throws IOException {
@@ -68,7 +68,6 @@ public class ParquetFileDecryptor {
         (null != footerKeyBytes), (null != keyRetriever));
   }
   
-  // TODO optimize: store in a list/map
   public synchronized ColumnDecryptors getColumnDecryptors(String[] path) throws IOException {
     if (!fileCryptoMDSet) {
       throw new IOException("Haven't parsed the footer yet");
@@ -103,6 +102,7 @@ public class ParquetFileDecryptor {
       decryptors.status = ColumnDecryptors.Status.PLAINTEXT;
       return decryptors;
     }
+    // TODO optimize (store in a map)? called up to twice in a file (?)
     // Column is encrypted, find the key
     byte[] columnKeyBytes = dSetup.getColumnKey(path);
     // No explicit column key given via API
@@ -161,50 +161,42 @@ public class ParquetFileDecryptor {
       }
       uniformEncryption = fcmd.isUniform_encryption();
       footerEncrypted = fcmd.isEncrypted_footer();
-      
       // ignore key metadata if key is explicitly set via API
       if (footerEncrypted && (null == footerKeyBytes)) { 
-        byte[] key_meta_data = fcmd.getFooter_key_metadata();
-        if (null == key_meta_data) throw new IOException("No footer key or key metadata");
+        byte[] footer_key_meta_data = fcmd.getFooter_key_metadata();
+        if (null == footer_key_meta_data) throw new IOException("No footer key or key metadata");
         if (null == keyRetriever) throw new IOException("No footer key or key retriever");
-        footerKeyBytes = keyRetriever.getKey(key_meta_data);
+        footerKeyBytes = keyRetriever.getKey(footer_key_meta_data);
       }
       if (footerEncrypted && (null == footerKeyBytes)) {
         throw new IOException("Footer decryption key unavailable");
       }
-      if  (footerEncrypted) aesGcmBlockDecryptor = new AesGcmDecryptor(footerKeyBytes, aadBytes);
+      if (footerEncrypted) aesGcmBlockDecryptor = new AesGcmDecryptor(footerKeyBytes, aadBytes);
       if (fcmd.isSetColumn_crypto_meta_data()) {
         columnMDList = fcmd.getColumn_crypto_meta_data();
       }
+      if (!uniformEncryption && (null == columnMDList)) {
+        throw new IOException("Non-unform encryption: no column metadata");
+      }  
       fileCryptoMDSet = true;
     }
-    // re-use of the decryptor. checking the parameters.
-    // TODO check multi-key re-use
+    // re-use of the decryptor. compare the crypto metadata.
     else {
-      if (algorithmId != fcmd.getEncryption_algorithm()) {
-        throw new IOException("Re-use with different algorithm: " + fcmd.getEncryption_algorithm());
+      // can't compare fileCryptoMetaData directly to fcmd (footer offset, etc)
+      if (fcmd.getEncryption_algorithm() != algorithmId) {
+        throw new IOException("Decryptor re-use: Different algorithm");
       }
-      if (!fcmd.isUniform_encryption()) {
-        if (uniformEncryption) {
-          throw new IOException("Re-use with non-uniform encryption");
-        }
-        if (!fcmd.isSetColumn_crypto_meta_data()) {
-          throw new IOException("Re-use with non-uniform encryption: No column metadata");
-        }
+      if (fcmd.isEncrypted_footer() != footerEncrypted) {
+        throw new IOException("Decryptor re-use: Encrypted vs plaintext footer");
+      }
+      // TODO compare key metadata
+      // TODO compare iv prefix
+      if (fcmd.isUniform_encryption() != uniformEncryption) {
+        throw new IOException("Decryptor re-use: Uniform vs nonuniform");
+      }
+      if (!uniformEncryption) {
         if (!columnMDList.equals(fcmd.getColumn_crypto_meta_data())) {
-          throw new IOException("Re-use with non-uniform encryption: Different metadata");
-        }
-      }
-      else {
-        if (!uniformEncryption) {
-          throw new IOException("Re-use with uniform encryption");
-        }
-      }
-      byte[] key_meta_data = fcmd.getFooter_key_metadata();
-      if (null != key_meta_data && null != keyRetriever) {
-        byte[] key_bytes = keyRetriever.getKey(key_meta_data);
-        if (!Arrays.equals(key_bytes, footerKeyBytes)) {
-          throw new IOException("Re-use with different footer key");
+          throw new IOException("Decryptor re-use: Different column metadata");
         }
       }
     }

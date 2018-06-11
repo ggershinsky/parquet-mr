@@ -33,6 +33,7 @@ public class ColumnMetadata {
   private byte[] keyBytes;
   private byte[] keyMetaData;
   private ColumnCryptoMetaData ccmd;
+  private boolean processed ;
   
   /**
    * Convenience constructor for regular (not nested) columns.
@@ -46,17 +47,18 @@ public class ColumnMetadata {
   public ColumnMetadata(boolean encrypt, String[] path) {
     this.encrypt = encrypt;
     this.columnPath = path;
-    this.isEncryptedWithFooterKey = encrypt;
+    isEncryptedWithFooterKey = encrypt;
+    processed = false;
   }
   
   public void setEncryptionKey(byte[] keyBytes, byte[] keyMetaData) throws IOException {
-    // TODO if this object is read, throw an exception
+    if (processed) throw new IOException("Metadata already processed");
     if (!encrypt) throw new IOException("Setting key on unencrypted column: " + Arrays.toString(columnPath));
     if (null == keyBytes) throw new IOException("Null key for " + Arrays.toString(columnPath));
+    //TODO compare to footer key?
+    isEncryptedWithFooterKey = false;
     this.keyBytes = keyBytes;
     this.keyMetaData = keyMetaData;
-    //TODO compare to footer key?
-    this.isEncryptedWithFooterKey = false;
   }
   
   public void setEncryptionKey(byte[] keyBytes, int keyIdMetaData) throws IOException {
@@ -65,14 +67,17 @@ public class ColumnMetadata {
   }
 
   String[] getPath() {
+    processed = true;
     return columnPath;
   }
 
   boolean isEncrypted() {
+    processed = true;
     return encrypt;
   }
   
   ColumnCryptoMetaData getColumnCryptoMetaData() {
+    processed = true;
     if (null != ccmd) return ccmd;
     ccmd = new ColumnCryptoMetaData(Arrays.asList(columnPath), encrypt, isEncryptedWithFooterKey);
     if (null != keyMetaData) {
@@ -82,6 +87,7 @@ public class ColumnMetadata {
   }
 
   byte[] getKeyBytes() {
+    processed = true;
     return keyBytes;
   }
 }
