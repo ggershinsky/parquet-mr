@@ -96,9 +96,11 @@ public class CatCommand extends BaseCommand {
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      String columnKey = Base64.getEncoder().encodeToString(colKeyBytes);
+      console.info("Column key: " +columnKey);
       
       // #1
-      kr.putKey(15, colKeyBytes);
+      //kr.putKey(15, colKeyBytes);
       
       DecryptionSetup dSetup = new DecryptionSetup(kr);
       
@@ -110,8 +112,8 @@ public class CatCommand extends BaseCommand {
  
  
       // #3
-      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
-      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
+      //fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
+      fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(dSetup);
     }
     
     Configuration conf = getConf();
@@ -156,4 +158,3 @@ public class CatCommand extends BaseCommand {
     );
   }
 }
-

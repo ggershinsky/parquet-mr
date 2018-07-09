@@ -29,8 +29,8 @@ import org.apache.parquet.cli.csv.AvroCSVReader;
 import org.apache.parquet.cli.csv.CSVProperties;
 import org.apache.parquet.cli.csv.AvroCSV;
 import org.apache.parquet.cli.util.Schemas;
-import org.apache.parquet.crypto.ColumnMetadata;
-import org.apache.parquet.crypto.Cipher;
+import org.apache.parquet.crypto.ColumnCryptodata;
+import org.apache.parquet.crypto.ParquetCipher;
 import org.apache.parquet.crypto.EncryptionSetup;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileEncryptor;
@@ -192,29 +192,32 @@ public class ConvertCSVCommand extends BaseCommand {
       }
       
       // #1
-      //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, keyBytes, 12);
-      EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, null, null);
+      EncryptionSetup eSetup = new EncryptionSetup(ParquetCipher.AES_GCM_V1, keyBytes, 12);
+      //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, null, null);
+      //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_CTR_V1, keyBytes, 12);
       
       // #2
-      ColumnMetadata encCol = new ColumnMetadata(true, "pageRank");
+      ColumnCryptodata encCol = new ColumnCryptodata(true, "pageRank");
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
+      String columnKey = Base64.getEncoder().encodeToString(colKeyBytes);
+      console.info("Column key: " +columnKey);
       
       // #3
       encCol.setEncryptionKey(colKeyBytes, 15);
       
-      ArrayList<ColumnMetadata> columnMD = new ArrayList<ColumnMetadata>();
+      ArrayList<ColumnCryptodata> columnMD = new ArrayList<ColumnCryptodata>();
       columnMD.add(encCol);
       
       // #4
-      eSetup.setColumnMetadata(columnMD, false);
+      eSetup.setColumns(columnMD, false);
       
       byte[] aad = outputPath.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+outputPath+". Len: "+aad.length);
       
       // #5
-      eSetup.setAAD(aad);
+      eSetup.setAAD(aad, null);
       
       // #6
       //fileEncryptor = ParquetEncryptionFactory.createFileEncryptor(keyBytes);

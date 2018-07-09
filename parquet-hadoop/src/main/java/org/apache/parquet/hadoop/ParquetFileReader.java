@@ -74,7 +74,7 @@ import org.apache.parquet.column.page.DataPageV2;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
-import org.apache.parquet.format.BlockCrypto;
+import org.apache.parquet.format.BlockCipher;
 import org.apache.parquet.format.DataPageHeader;
 import org.apache.parquet.format.DataPageHeaderV2;
 import org.apache.parquet.format.DictionaryPageHeader;
@@ -108,7 +108,6 @@ public class ParquetFileReader implements Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(ParquetFileReader.class);
 
   public static String PARQUET_READ_PARALLELISM = "parquet.metadata.read.parallelism";
-  static String DECRYPTION_KEY_PARAMETER_NAME = "parquet.decryption.key";
 
   private final ParquetMetadataConverter converter;
   
@@ -536,15 +535,6 @@ public class ParquetFileReader implements Closeable {
     String filePath = file.toString();
     LOG.debug("File length {}", fileLen);
     
-    // TODO decryption activation by configuration
-    if (null == fileDecryptor) {
-      String decryptionKey = options.getProperty(DECRYPTION_KEY_PARAMETER_NAME);
-      if (null != decryptionKey) {
-        byte[] keyBytes = Base64.getDecoder().decode(decryptionKey);
-        fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
-      }
-    }
-    
     if (null == fileDecryptor) {
       int FOOTER_LENGTH_SIZE = 4;
       if (fileLen < MAGIC.length + FOOTER_LENGTH_SIZE + MAGIC.length) { // MAGIC + data + footer + footerIndex + MAGIC
@@ -760,13 +750,6 @@ public class ParquetFileReader implements Closeable {
     this.f = file.newStream();
     this.options = options;
     this.fileDecryptor = fileDecryptor;
-    if (null == fileDecryptor) {
-      String decryptionKey = options.getProperty(DECRYPTION_KEY_PARAMETER_NAME);
-      if (null != decryptionKey) {
-        byte[] keyBytes = Base64.getDecoder().decode(decryptionKey);
-        this.fileDecryptor = ParquetEncryptionFactory.createFileDecryptor(keyBytes);
-      }
-    }
     this.footer = readFooter(file, options, f, converter, fileDecryptor);
     this.fileMetaData = footer.getFileMetaData();
     this.blocks = filterRowGroups(footer.getBlocks());
@@ -907,7 +890,8 @@ public class ParquetFileReader implements Closeable {
             currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages());
           }
           else if (decryptors.getStatus() == ColumnDecryptors.Status.KEY_AVAILABLE) {
-            currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages(decryptors.getMetadataDecryptor(), decryptors.getDataDecryptor()));
+            currentRowGroup.addColumn(chunk.descriptor.col, 
+                chunk.readAllPages(decryptors.getMetadataDecryptor(), decryptors.getDataDecryptor()));
           }
           else { // Key unavailable
             currentRowGroup.addColumn(chunk.descriptor.col, new ColumnChunkPageReader());
@@ -1041,10 +1025,10 @@ public class ParquetFileReader implements Closeable {
     }
 
     protected PageHeader readPageHeader() throws IOException {
-      return readPageHeader((BlockCrypto.Decryptor) null);
+      return readPageHeader((BlockCipher.Decryptor) null);
     }
 
-    protected PageHeader readPageHeader(BlockCrypto.Decryptor blockDecryptor) throws IOException {
+    protected PageHeader readPageHeader(BlockCipher.Decryptor blockDecryptor) throws IOException {
       return Util.readPageHeader(stream, blockDecryptor);
     }
 
@@ -1053,12 +1037,11 @@ public class ParquetFileReader implements Closeable {
      * @return the list of pages
      */
     public ColumnChunkPageReader readAllPages() throws IOException {
-      return readAllPages((BlockCrypto.Decryptor) null, (BlockCrypto.Decryptor) null);
+      return readAllPages((BlockCipher.Decryptor) null, (BlockCipher.Decryptor) null);
     }
 
-    public ColumnChunkPageReader readAllPages(BlockCrypto.Decryptor headerBlockDecryptor, 
-        BlockCrypto.Decryptor pageBlockDecryptor) throws IOException {
-      //BlockCrypto.Decryptor statsBlockDecryptor = decryptStats ? headerBlockDecryptor: null;
+    public ColumnChunkPageReader readAllPages(BlockCipher.Decryptor headerBlockDecryptor, 
+        BlockCipher.Decryptor pageBlockDecryptor) throws IOException {
       List<DataPage> pagesInChunk = new ArrayList<DataPage>();
       DictionaryPage dictionaryPage = null;
       PrimitiveType type = getFileMetaData().getSchema()
