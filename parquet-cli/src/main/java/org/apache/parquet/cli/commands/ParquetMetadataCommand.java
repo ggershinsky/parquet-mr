@@ -31,7 +31,7 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.EncodingStats;
 import org.apache.parquet.column.statistics.Statistics;
-import org.apache.parquet.crypto.DecryptionSetup;
+import org.apache.parquet.crypto.FileDecryptionProperties;
 import org.apache.parquet.crypto.IntegerKeyIdRetriever;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileDecryptor;
@@ -108,7 +108,7 @@ public class ParquetMetadataCommand extends BaseCommand {
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
       //kr.putKey(15, colKeyBytes);
       
-      DecryptionSetup dSetup = new DecryptionSetup(kr);
+      FileDecryptionProperties dSetup = new FileDecryptionProperties(kr);
       
       byte[] aad = source.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+source+". Len: "+aad.length);
@@ -170,7 +170,7 @@ public class ParquetMetadataCommand extends BaseCommand {
     try {
       start = rowGroup.getStartingPos();
     }
-    catch (RuntimeException e) { // TODO
+    catch (RuntimeException e) { // TODO Wont be thrown with RowGroup.getFile_offset();
       console.info(String.format("First column is hidden, can't calculate starting position", index));
     }
     long rowCount = rowGroup.getRowCount();
@@ -178,7 +178,7 @@ public class ParquetMetadataCommand extends BaseCommand {
     try {
       compressedSize = rowGroup.getCompressedSize();
     }
-    catch (RuntimeException e) { //TODO
+    catch (RuntimeException e) { //TODO Wont be thrown with RowGroup.getTotal_compressed_size();
       console.info(String.format("Hidden column(s), can't calculate total compressed size", index));
     }
     long uncompressedSize = rowGroup.getTotalByteSize();

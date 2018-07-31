@@ -27,7 +27,7 @@ import org.apache.avro.Schema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.cli.BaseCommand;
 import org.apache.parquet.cli.util.Expressions;
-import org.apache.parquet.crypto.DecryptionSetup;
+import org.apache.parquet.crypto.FileDecryptionProperties;
 import org.apache.parquet.crypto.IntegerKeyIdRetriever;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileDecryptor;
@@ -102,7 +102,7 @@ public class CatCommand extends BaseCommand {
       // #1
       //kr.putKey(15, colKeyBytes);
       
-      DecryptionSetup dSetup = new DecryptionSetup(kr);
+      FileDecryptionProperties dSetup = new FileDecryptionProperties(kr);
       
       byte[] aad = source.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+source+". Len: "+aad.length);

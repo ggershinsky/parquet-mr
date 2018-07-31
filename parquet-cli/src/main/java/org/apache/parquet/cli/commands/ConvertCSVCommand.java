@@ -29,9 +29,9 @@ import org.apache.parquet.cli.csv.AvroCSVReader;
 import org.apache.parquet.cli.csv.CSVProperties;
 import org.apache.parquet.cli.csv.AvroCSV;
 import org.apache.parquet.cli.util.Schemas;
-import org.apache.parquet.crypto.ColumnCryptodata;
+import org.apache.parquet.crypto.ColumnEncryptionProperties;
 import org.apache.parquet.crypto.ParquetCipher;
-import org.apache.parquet.crypto.EncryptionSetup;
+import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.crypto.ParquetEncryptionFactory;
 import org.apache.parquet.crypto.ParquetFileEncryptor;
 import org.apache.avro.Schema;
@@ -192,12 +192,13 @@ public class ConvertCSVCommand extends BaseCommand {
       }
       
       // #1
-      EncryptionSetup eSetup = new EncryptionSetup(ParquetCipher.AES_GCM_V1, keyBytes, 12);
+      FileEncryptionProperties eSetup = new FileEncryptionProperties(ParquetCipher.AES_GCM_V1, keyBytes, 12);
       //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_V1, null, null);
       //EncryptionSetup eSetup = new EncryptionSetup(Cipher.AES_GCM_CTR_V1, keyBytes, 12);
       
       // #2
-      ColumnCryptodata encCol = new ColumnCryptodata(true, "pageRank");
+      //ColumnCryptodata encCol = new ColumnCryptodata(true, "pageURL");
+      ColumnEncryptionProperties encCol = new ColumnEncryptionProperties(true, "pageRank");
       
       byte[] colKeyBytes = new byte[16]; 
       for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i%3);}
@@ -207,11 +208,11 @@ public class ConvertCSVCommand extends BaseCommand {
       // #3
       encCol.setEncryptionKey(colKeyBytes, 15);
       
-      ArrayList<ColumnCryptodata> columnMD = new ArrayList<ColumnCryptodata>();
+      ArrayList<ColumnEncryptionProperties> columnMD = new ArrayList<ColumnEncryptionProperties>();
       columnMD.add(encCol);
       
       // #4
-      eSetup.setColumns(columnMD, false);
+      eSetup.setColumnProperties(columnMD, false);
       
       byte[] aad = outputPath.getBytes(StandardCharsets.UTF_8);
       console.info("AAD: "+outputPath+". Len: "+aad.length);

@@ -19,18 +19,14 @@
 
 package org.apache.parquet.crypto;
 
-import org.apache.parquet.format.BlockCipher;
+import java.util.Arrays;
 
-public class ColumnEncryptors {
+import org.apache.parquet.ParquetRuntimeException;
+
+public class HiddenColumnException extends ParquetRuntimeException {
+  private static final long serialVersionUID = 1L;
   
-  BlockCipher.Encryptor metadataEncryptor;
-  BlockCipher.Encryptor dataEncryptor;
-  
-  public BlockCipher.Encryptor getDataEncryptor() {
-    return dataEncryptor;
-  }
-  
-  public BlockCipher.Encryptor getMetadataEncryptor() {
-    return metadataEncryptor;
+  public HiddenColumnException(String[] columnPath) {
+    super(Arrays.toString(columnPath));
   }
 }
