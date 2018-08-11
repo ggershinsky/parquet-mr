@@ -719,7 +719,7 @@ public class ParquetFileWriter {
       long cryptoMDIndex = out.getPos();
       writeFileCryptoMetaData(fileEncryptor.getFileCryptoMetaData(footerIndex), out);
       int cryptoMDLength = (int)(out.getPos() - cryptoMDIndex);
-      LOG.debug("{}: crypto metedata length = {}" , out.getPos(), cryptoMDLength);
+      LOG.debug("{}: crypto metadata length = {}" , out.getPos(), cryptoMDLength);
       BytesUtils.writeIntLittleEndian(out, cryptoMDLength);
       out.write(EMAGIC);
     }

@@ -23,7 +23,7 @@ import java.util.Hashtable;
 
 import org.apache.parquet.bytes.BytesUtils;
 
-// Simple key retriever, based on integer keyID
+// Simple key retriever, based on integer keyID (little endian)
 public class IntegerKeyIdRetriever implements DecryptionKeyRetriever{
 
   private final Hashtable<Integer,byte[]> keyMap;

@@ -38,36 +38,47 @@ public class FileEncryptionProperties {
   private boolean encryptTheRest;
   //Uniform encryption means footer and all columns are encrypted, with same key
   private boolean uniformEncryption;
-  private boolean setupProcessed;
+  private boolean processed;
   
   /**
    * Constructor with a custom key metadata.
    * 
-   * @param keyBytes Encryption key for file footer and some (or all) columns.
+   * @param cipher 
+   * @param keyBytes Encryption key for file footer and some (or all) columns. 
+   * Key length must be either 16, 24 or 32 bytes.
+   * If null, footer won't be encrypted.
    * @param keyMetadata Key metadata, to be written in a file for key retrieval upon decryption. Can be null.
+   * Maximal length is 256 bytes.
    * @throws IOException 
    */
   public FileEncryptionProperties(ParquetCipher cipher, byte[] keyBytes, byte[] keyMetadata) throws IOException {
+    if (null != keyBytes) {
+      if (! (keyBytes.length == 16 || keyBytes.length == 24 || keyBytes.length == 32)) {
+        throw new IOException("Wrong key length " + keyBytes.length);
+      }
+      uniformEncryption = true;
+    }
+    else {
+      if (null != keyMetadata) {
+        throw new IOException("Setting metadata for null footer key");
+      }
+      uniformEncryption = false;
+    }
+    if ((null != keyMetadata) && (keyMetadata.length > 256)) { // TODO 
+      throw new IOException("Footer key meta data is too long: " + keyMetadata.length);
+    }
+    
     footerKeyBytes = keyBytes;
     footerKeyMetadata = keyMetadata;
-    if (null != footerKeyBytes) {
-      if (! (footerKeyBytes.length == 16 || footerKeyBytes.length == 24 || footerKeyBytes.length == 32)) {
-        throw new IOException("Wrong key length " + footerKeyBytes.length);
-      }
-    }
-    if ((null != footerKeyMetadata) && (footerKeyMetadata.length > 256)) { // TODO 
-      throw new IOException("Footer key meta data is too long: " + footerKeyMetadata.length);
-    }
-    uniformEncryption = true;
     algorithm = cipher.getEncryptionAlgorithm();
-    setupProcessed = false;
+    processed = false;
   }
   
   /**
    * Constructor with a 4-byte key metadata derived from an integer key ID.
    * 
-   * @param keyBytes Encryption key for file footer and some (or all) columns.
-   * @param keyId Key id - will be converted to a 4-byte metadata and written in a file for key retrieval upon decryption.
+   * @param keyBytes 
+   * @param keyId Key id - will be converted to a 4-byte little endian metadata and written in a file for key retrieval upon decryption.
    * @throws IOException 
    */
   public FileEncryptionProperties(ParquetCipher algorithm, byte[] keyBytes, int keyId) throws IOException {
@@ -75,7 +86,7 @@ public class FileEncryptionProperties {
   }
   
   /**
-   * Set column crypto metadata (eg what columns should be encrypted). Each column in the list has a boolean 'encrypted' flag.
+   * Set column encryption properties. 
    * The list doesn't have to include all columns in a file. If encryptTheRest is true, the rest of the columns (not in the list)
    * will be encrypted with the file footer key. If encryptTheRest is false, the rest of the columns will be left unencrypted.
    * @param columnList
@@ -83,7 +94,7 @@ public class FileEncryptionProperties {
    * @throws IOException 
    */
   public void setColumnProperties(List<ColumnEncryptionProperties> columnList, boolean encryptTheRest) throws IOException {
-    if (setupProcessed) throw new IOException("Setup already processed");
+    if (processed) throw new IOException("Setup already processed");
     // TODO if set, throw an exception? or allow to replace
     uniformEncryption = false;
     this.encryptTheRest = encryptTheRest;
@@ -107,10 +118,11 @@ public class FileEncryptionProperties {
    * Set the AES-GCM additional authenticated data (AAD).
    * 
    * @param aad
+   * @param aadMetadata Maximal length is 256 bytes.
    * @throws IOException 
    */
   public void setAAD(byte[] aad, byte[] aadMetadata) throws IOException {
-    if (setupProcessed) throw new IOException("Setup already processed");
+    if (processed) throw new IOException("Setup already processed");
     if (null == aad) throw new IOException("Null AAD");
     // TODO if set, throw an exception? or allow to replace
     aadBytes = aad;
@@ -126,27 +138,27 @@ public class FileEncryptionProperties {
   }
   
   EncryptionAlgorithm getAlgorithm() {
-    setupProcessed = true;
+    processed = true;
     return algorithm;
   }
 
   byte[] getFooterKeyBytes() {
-    setupProcessed = true;
+    processed = true;
     return footerKeyBytes;
   }
 
   byte[] getFooterKeyMetadata() {
-    setupProcessed = true;
+    processed = true;
     return footerKeyMetadata;
   }
 
   boolean isUniformEncryption() {
-    setupProcessed = true;
+    processed = true;
     return uniformEncryption;
   }
 
   ColumnEncryptionProperties getColumnMetadata(String[] columnPath) {
-    setupProcessed = true;
+    processed = true;
     boolean in_list = false;
     ColumnEncryptionProperties cmd = null;
     for (ColumnEncryptionProperties col : columnList) {
@@ -165,7 +177,14 @@ public class FileEncryptionProperties {
   }
 
   byte[] getAAD() {
-    setupProcessed = true;
+    processed = true;
     return aadBytes;
+  }
+
+  void checkUp() throws IOException {
+    if (null == footerKeyBytes && null == columnList) {
+      throw new IOException("Null footer key and column keys");
+    }
+    
   }
 }

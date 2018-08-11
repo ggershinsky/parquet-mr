@@ -43,6 +43,11 @@ public class ColumnEncryptionProperties {
     this(encrypt, new String[] {name});
   }
   
+  /**
+   * 
+   * @param encrypt
+   * @param path
+   */
   public ColumnEncryptionProperties(boolean encrypt, String[] path) {
     this.encrypt = encrypt;
     this.columnPath = path;
@@ -50,6 +55,13 @@ public class ColumnEncryptionProperties {
     processed = false;
   }
   
+  /**
+   * If this method is not called on an encrypted column, the column will
+   * be encrypted with footer key.
+   * @param keyBytes Key length must be either 16, 24 or 32 bytes.
+   * @param keyMetaData maximal length is 256 bytes.
+   * @throws IOException
+   */
   public void setEncryptionKey(byte[] keyBytes, byte[] keyMetaData) throws IOException {
     if (processed) throw new IOException("Metadata already processed");
     if (!encrypt) throw new IOException("Setting key on unencrypted column: " + Arrays.toString(columnPath));
@@ -60,6 +72,12 @@ public class ColumnEncryptionProperties {
     this.keyMetaData = keyMetaData;
   }
   
+  /**
+   * 
+   * @param keyBytes Key length must be either 16, 24 or 32 bytes.
+   * @param keyIdMetaData will be serialized as little endian 4-byte array.
+   * @throws IOException
+   */
   public void setEncryptionKey(byte[] keyBytes, int keyIdMetaData) throws IOException {
     byte[] metaData = BytesUtils.intToBytes(keyIdMetaData);
     setEncryptionKey(keyBytes, metaData);
@@ -87,6 +105,7 @@ public class ColumnEncryptionProperties {
   }
 
   byte[] getKeyMetaData() {
+    processed = true;
     return keyMetaData;
   }
 }

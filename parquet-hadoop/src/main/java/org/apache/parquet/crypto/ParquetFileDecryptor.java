@@ -83,8 +83,8 @@ public class ParquetFileDecryptor {
     this.dSetup= dSetup;
     footerKeyBytes = dSetup.getFooterKeyBytes();
     keyRetriever = dSetup.getKeyRetriever();
-    if ((null != footerKeyBytes) && (null != keyRetriever)) {
-      throw new IOException("Can't set both explicit key and key retriever");
+    if ((null == footerKeyBytes) && (null == keyRetriever)) {
+      throw new IOException("Footer key and key retriever are null");
     }
     aadBytes = dSetup.getAAD();
     aadRetriever = dSetup.getAadRetriever();

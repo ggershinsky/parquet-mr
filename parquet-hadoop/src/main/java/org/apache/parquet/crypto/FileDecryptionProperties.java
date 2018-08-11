@@ -27,40 +27,81 @@ import java.util.List;
 
 public class FileDecryptionProperties {
 
-  private final byte[] footerKeyBytes;
-  private final DecryptionKeyRetriever keyRetriever;
+  private byte[] footerKeyBytes;
+  private DecryptionKeyRetriever keyRetriever;
   private AADRetriever aadRetriever;
   
   private byte[] aadBytes;
   private List<ColumnDecryptionSetup> columnKeyList;
-  private boolean setupProcessed;
+  private boolean processed;
 
+
+  public FileDecryptionProperties() {
+    this.keyRetriever = null;
+    processed = false;
+  }
+  
   /**
-   * Configure a file decryptor with an explicit footer key. If applied on a file that contains footer key metadata - 
-   * the metadata will be ignored, the footer will be decrypted with the provided explicit key.
-   * @param keyBytes
+   * Set an explicit footer key. If applied on a file that contains footer key metadata - 
+   * the metadata will be ignored, the footer will be decrypted with this key.
+   * @param footerKey Key length must be either 16, 24 or 32 bytes.
    * @throws IOException 
    */
-  public FileDecryptionProperties(byte[] footerKeyBytes) throws IOException {
-    if (null == footerKeyBytes) throw new IOException("Decryption: null footer key");
-    this.footerKeyBytes = footerKeyBytes;
+  public void setFooterKey(byte[] footerKey) throws IOException {
+    if (processed) throw new IOException("Properties already processed");
+    if (null == footerKey) {
+      throw new IOException("Setting null key");
+    }
+    this.footerKeyBytes = footerKey;
     if (! (footerKeyBytes.length == 16 || footerKeyBytes.length == 24 || footerKeyBytes.length == 32)) {
       throw new IOException("Wrong key length " + footerKeyBytes.length);
     }
-    this.keyRetriever = null;
-    setupProcessed = false;
+  }
+
+
+  /**
+   * Convenience method for regular (not nested) columns.
+   * @param columnName
+   * @param columnKey
+   * @throws IOException
+   */
+  public void setColumnKey(String columnName, byte[] columnKey) throws IOException {
+    setColumnKey(new String[] {columnName}, columnKey);
   }
 
   /**
-   * Configure a file decryptor with a key retriever callback. If applied on a file that doesn't contain key metadata - 
-   * an exception will be thrown.
+   * Set an explicit column key. If applied on a file that contains key metadata for this column - 
+   * the metadata will be ignored, the column will be decrypted with this key.
+   * @param columnPath
+   * @param columnKey Key length must be either 16, 24 or 32 bytes.
+   * @throws IOException 
+   */
+  public void setColumnKey(String[] columnPath, byte[] columnKey) throws IOException {
+    if (processed) throw new IOException("Properties already processed");
+    if (null == columnKey) throw new IOException("Decryption: null column key");
+    if (! (columnKey.length == 16 || columnKey.length == 24 || columnKey.length == 32)) {
+      throw new IOException("Wrong key length " + columnKey.length);
+    }
+    // TODO compare to footer key?
+    // TODO if set for this column, throw an exception? or allow to replace
+    if (null == columnKeyList) columnKeyList = new ArrayList<ColumnDecryptionSetup>();
+    ColumnDecryptionSetup cmd = new ColumnDecryptionSetup(true, columnPath);
+    cmd.setEncryptionKey(columnKey);
+    columnKeyList.add(cmd);
+  }
+  
+  /**
+   * Set a key retriever callback. Its also possible to
+   * set explicit footer or column keys on this property object. Upon file decryption, 
+   * availability of explicit keys is checked before invocation of the retriever callback.
    * @param keyRetriever
    */
-  public FileDecryptionProperties(DecryptionKeyRetriever keyRetriever) {
+  public void setKeyRetriever(DecryptionKeyRetriever keyRetriever) {
     this.keyRetriever = keyRetriever;
     this.footerKeyBytes = null;
+    processed = false;
   }
-
+  
   /**
    * Set the AES-GCM additional authenticated data (AAD).
    * 
@@ -68,57 +109,39 @@ public class FileDecryptionProperties {
    * @throws IOException 
    */
   public void setAAD(byte[] aad) throws IOException {
-    if (setupProcessed) throw new IOException("Setup already processed");
+    if (processed) throw new IOException("Properties already processed");
     // TODO if set, throw an exception? or allow to replace
     aadBytes = aad;
   }
   
-  public void setAadRetriever(AADRetriever aadRetriever) {
+  /**
+   * Set an AAD retrieval callback.
+   * @param aadRetriever
+   * @throws IOException
+   */
+  public void setAadRetriever(AADRetriever aadRetriever) throws IOException {
+    if (processed) throw new IOException("Properties already processed");
     this.aadRetriever = aadRetriever;
   }
-
-  public void setColumnKey(String columnName, byte[] decryptionKey) throws IOException {
-    setColumnKey(new String[] {columnName}, decryptionKey);
-  }
-
-  /**
-   * Configure a column decryptor with an explicit column key. If applied on a file that 
-   * contains key metadata for this column - 
-   * the metadata will be ignored, the column will be decrypted with the provided explicit key.
-   * @param 
-   * @throws IOException 
-   */
-  public void setColumnKey(String[] columnPath, byte[] decryptionKey) throws IOException {
-    if (setupProcessed) throw new IOException("Setup already processed");
-    if (null == decryptionKey) throw new IOException("Decryption: null column key");
-    if (! (decryptionKey.length == 16 || decryptionKey.length == 24 || decryptionKey.length == 32)) {
-      throw new IOException("Wrong key length " + decryptionKey.length);
-    }
-    // TODO compare to footer key?
-    // TODO if set for this column, throw an exception? or allow to replace
-    if (null == columnKeyList) columnKeyList = new ArrayList<ColumnDecryptionSetup>();
-    ColumnDecryptionSetup cmd = new ColumnDecryptionSetup(true, columnPath);
-    cmd.setEncryptionKey(decryptionKey);
-    columnKeyList.add(cmd);
-  }
+  
 
   byte[] getFooterKeyBytes() {
-    setupProcessed = true;
+    processed = true;
     return footerKeyBytes;
   }
 
   DecryptionKeyRetriever getKeyRetriever() {
-    setupProcessed = true;
+    processed = true;
     return keyRetriever;
   }
 
   byte[] getAAD() {
-    setupProcessed = true;
+    processed = true;
     return aadBytes;
   }
 
   byte[] getColumnKey(String[] path) {
-    setupProcessed = true;
+    processed = true;
     if (null == columnKeyList)  return null;
     for (ColumnDecryptionSetup col : columnKeyList) {
       if (Arrays.deepEquals(path, col.getPath())) {
@@ -129,6 +152,7 @@ public class FileDecryptionProperties {
   }
 
   AADRetriever getAadRetriever() {
+    processed = true;
     return aadRetriever;
   }
 }

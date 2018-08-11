@@ -68,11 +68,12 @@ public class ParquetFileEncryptor {
   private boolean fileCryptoMDSet;
 
   ParquetFileEncryptor(FileEncryptionProperties eSetup) throws IOException {
+    eSetup.checkUp();
     algorithm = eSetup.getAlgorithm();
     if (null == algorithm) throw new IOException("Null algorithm");
     uniformEncryption = eSetup.isUniformEncryption();
     footerKeyBytes = eSetup.getFooterKeyBytes();
-    if (null ==  footerKeyBytes) {
+    if (null == footerKeyBytes) {
       if (uniformEncryption) throw new IOException("Null key in uniform encryption");
       encryptFooter = false;
     }
