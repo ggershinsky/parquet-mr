@@ -36,7 +36,7 @@ import org.apache.parquet.crypto.ParquetFileEncryptor;
  * as below.
  *
  * 1  Write a class to implement FileEncDecryptorRetriever. The sample implementation can be
- *    found http://xxxxxxxxxxxx.
+ *    found https://github.com/shangxinli/parquetcrytosampleretriever 
  *    1.1) To implement getFileEncryptor(), you need to create an instance of
  *       ParquetFileEncryptor and return it. To create that instance, you usually need
  *       to know each column of current schema of current writing
