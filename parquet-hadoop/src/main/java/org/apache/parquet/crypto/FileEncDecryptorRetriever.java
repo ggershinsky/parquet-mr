@@ -78,14 +78,6 @@ import org.apache.parquet.crypto.ParquetFileEncryptor;
 public interface FileEncDecryptorRetriever {
 
   /**
-   * Initialization of the object - For example, KMS client and Schema
-   * initialization can be done here.
-   *
-   * @param conf Configuration of running task
-   */
-  //void initialize(Configuration conf) throws IOException;
-
-  /**
    * Get the file encryptor for encrypting parquet files.
    *
    * @param conf Configuration of running task
