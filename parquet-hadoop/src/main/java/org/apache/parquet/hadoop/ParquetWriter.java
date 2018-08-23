@@ -1,4 +1,4 @@
-/* 
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.parquet.hadoop;
+
+import static org.apache.parquet.crypto.CryptoClassLoader.getParquetFileEncryptorOrNull;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -54,7 +56,6 @@ public class ParquetWriter<T> implements Closeable {
 
   // max size (bytes) to write as padding and the min size of a row group
   public static final int MAX_PADDING_SIZE_DEFAULT = 8 * 1024 * 1024; // 8MB
-  
 
 
   private final InternalParquetRecordWriter<T> writer;
@@ -196,7 +197,7 @@ public class ParquetWriter<T> implements Closeable {
         compressionCodecName, blockSize, pageSize, dictionaryPageSize,
         enableDictionary, validating, writerVersion, conf);
   }
-  
+
   @Deprecated
   public ParquetWriter(
       Path file,
@@ -254,7 +255,7 @@ public class ParquetWriter<T> implements Closeable {
             .withWriterVersion(writerVersion)
             .build(), (ParquetFileEncryptor) null);
   }
-  
+
   @Deprecated
   public ParquetWriter(
       Path file,
@@ -321,6 +322,11 @@ public class ParquetWriter<T> implements Closeable {
 
     WriteSupport.WriteContext writeContext = writeSupport.init(conf);
     MessageType schema = writeContext.getSchema();
+
+    //Try to get encryptor from configured class. If not configured, null is returned.
+    if (fileEncryptor == null) {
+      fileEncryptor = getParquetFileEncryptorOrNull(conf);
+    }
 
     ParquetFileWriter fileWriter = new ParquetFileWriter(
         file, schema, mode, rowGroupSize, maxPaddingSize, fileEncryptor);
@@ -449,7 +455,7 @@ public class ParquetWriter<T> implements Closeable {
       this.codecName = codecName;
       return self();
     }
-    
+
     /**
      * Set the {@link ParquetFileEncryptor file encryptor} used by the
      * constructed writer.
