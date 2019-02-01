@@ -87,7 +87,8 @@ public class AesDecryptor implements BlockCipher.Decryptor{
     int cipherTextLength = lengthAndCiphertext.length - INT_LENGTH;
     return decrypt(lengthAndCiphertext, cipherTextOffset, cipherTextLength, AAD);
   }
-  
+
+  @Override
   public byte[] decrypt(byte[] ciphertext, int cipherTextOffset, int cipherTextLength, byte[] AAD)  throws IOException {
     // Get the nonce from ciphertext
     if (Mode.GCM == aesMode) {

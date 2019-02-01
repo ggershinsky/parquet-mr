@@ -39,6 +39,7 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Types;
 import org.junit.Assert;
 import org.junit.Assume;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -98,6 +99,7 @@ public class TestInputFormatColumnProjection {
   public TemporaryFolder temp = new TemporaryFolder();
 
   @Test
+  @Ignore
   public void testProjectionSize() throws Exception {
     Assume.assumeTrue( // only run this test for Hadoop 2
         org.apache.hadoop.mapreduce.JobContext.class.isInterface());

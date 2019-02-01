@@ -49,7 +49,9 @@ public interface BlockCipher{
      * @throws IOException
      */
     public byte[] decrypt(byte[] lengthAndCiphertext, byte[] AAD) throws IOException;
-    
+
+    public byte[] decrypt(byte[] ciphertext, int cipherTextOffset, int cipherTextLength, byte[] AAD) throws IOException;
+
     public byte[] decryptInputStream(InputStream from, byte[] AAD) throws IOException;
   }
 }
