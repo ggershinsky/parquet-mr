@@ -32,7 +32,6 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
-import org.apache.parquet.crypto.CryptoClassLoader;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.compression.CompressionCodecFactory;
@@ -117,7 +116,7 @@ public class ParquetReader<T> implements Closeable {
         HadoopReadOptions.builder(conf)
             .withRecordFilter(checkNotNull(filter, "filter"))
             .build(),
-        readSupport, CryptoClassLoader.getFileDecryptionPropertiesOrNull(conf));
+        readSupport, (FileDecryptionProperties) null);
   }
 
   private ParquetReader(List<InputFile> files,
@@ -319,10 +318,6 @@ public class ParquetReader<T> implements Closeable {
 
     public ParquetReader<T> build() throws IOException {
       ParquetReadOptions options = optionsBuilder.build();
-
-      if (this.fileDecryptionProperties == null) {
-        this.fileDecryptionProperties = CryptoClassLoader.getFileDecryptionPropertiesOrNull(conf);
-      }
 
       if (path != null) {
         FileSystem fs = path.getFileSystem(conf);

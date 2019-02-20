@@ -45,7 +45,6 @@ import org.apache.parquet.io.api.RecordMaterializer.RecordMaterializationExcepti
 import org.apache.parquet.schema.MessageType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.parquet.crypto.InternalFileDecryptor;
 
 import static java.lang.String.format;
 import static org.apache.parquet.Preconditions.checkNotNull;
@@ -62,7 +61,7 @@ class InternalParquetRecordReader<T> {
   private MessageType requestedSchema;
   private MessageType fileSchema;
   private int columnCount;
-  private ReadSupport<T> readSupport;
+  private final ReadSupport<T> readSupport;
 
   private RecordMaterializer<T> recordConverter;
 
@@ -81,25 +80,14 @@ class InternalParquetRecordReader<T> {
   private long totalCountLoadedSoFar = 0;
 
   private UnmaterializableRecordCounter unmaterializableRecordCounter;
-  private InternalFileDecryptor fileDecryptor;
 
   /**
    * @param readSupport Object which helps reads files of the given type, e.g. Thrift, Avro.
    * @param filter for filtering individual records
    */
   public InternalParquetRecordReader(ReadSupport<T> readSupport, Filter filter) {
-    this(readSupport, filter, null);
-  }
-
-  /**
-   * @param readSupport Object which helps reads files of the given type, e.g. Thrift, Avro.
-   * @param filter for filtering individual records
-   * @param fileDecryptor for filtering decrypting records
-   */
-  public InternalParquetRecordReader(ReadSupport<T> readSupport, Filter filter, InternalFileDecryptor fileDecryptor) {
     this.readSupport = readSupport;
     this.filter = checkNotNull(filter, "filter");
-    this.fileDecryptor = fileDecryptor;
   }
 
   /**
@@ -183,10 +171,6 @@ class InternalParquetRecordReader<T> {
       conf.set(property, options.getProperty(property));
     }
 
-    if (this.readSupport == null) {
-      this.readSupport = ParquetInputFormat.getReadSupportInstance(conf);
-    }
-
     // initialize a ReadContext for this file
     this.reader = reader;
     FileMetaData parquetFileMetadata = reader.getFooter().getFileMetaData();
@@ -207,7 +191,6 @@ class InternalParquetRecordReader<T> {
 
   public void initialize(ParquetFileReader reader, Configuration configuration)
       throws IOException {
-    this.readSupport = ParquetInputFormat.getReadSupportInstance(configuration);
     // initialize a ReadContext for this file
     this.reader = reader;
     FileMetaData parquetFileMetadata = reader.getFooter().getFileMetaData();

@@ -47,7 +47,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
@@ -218,7 +217,6 @@ public class TestColumnChunkPageWriteStore {
   }
 
   @Test
-  @Ignore
   public void testColumnOrderV1() throws IOException {
     ParquetFileWriter mockFileWriter = Mockito.mock(ParquetFileWriter.class);
     InOrder inOrder = inOrder(mockFileWriter);

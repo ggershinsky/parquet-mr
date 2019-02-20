@@ -100,11 +100,6 @@ public class ParquetInputFormat<T> extends FileInputFormat<Void, T> {
   public static final String READ_SUPPORT_CLASS = "parquet.read.support.class";
 
   /**
-   * key to configure the ReadSupport override implementation
-   */
-  public static final String READ_SUPPORT_CLASS_OVERRIDE = "parquet.read.support.class.override";
-
-  /**
    * key to configure the filter
    */
   public static final String UNBOUND_RECORD_FILTER = "parquet.read.filter";
@@ -207,17 +202,7 @@ public class ParquetInputFormat<T> extends FileInputFormat<Void, T> {
   }
 
   public static Class<?> getReadSupportClass(Configuration configuration) {
-    if (configuration.get(READ_SUPPORT_CLASS_OVERRIDE) != null) {
-      return getReadSupportClass(configuration, READ_SUPPORT_CLASS_OVERRIDE);
-    } else if (configuration.get(READ_SUPPORT_CLASS) != null) {
-      return getReadSupportClass(configuration, READ_SUPPORT_CLASS);
-    } else {
-      return null;
-    }
-  }
-
-  public static Class<?> getReadSupportClass(Configuration configuration, String clazz) {
-    return ConfigurationUtil.getClassFromConfig(configuration, clazz, ReadSupport.class);
+    return ConfigurationUtil.getClassFromConfig(configuration, READ_SUPPORT_CLASS, ReadSupport.class);
   }
 
   public static void setFilterPredicate(Configuration configuration, FilterPredicate filterPredicate) {

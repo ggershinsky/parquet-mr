@@ -18,8 +18,6 @@
  */
 package org.apache.parquet.hadoop;
 
-import static org.apache.parquet.crypto.CryptoClassLoader.getFileEncryptionPropertiesOrNull;
-import static org.apache.parquet.crypto.CryptoClassLoader.getParquetFileEncryptorOrNull;
 import static org.apache.parquet.Preconditions.checkNotNull;
 import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE;
 import static org.apache.parquet.hadoop.util.ContextUtil.getConfiguration;
@@ -38,7 +36,6 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
-import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.api.WriteSupport.WriteContext;
@@ -48,9 +45,6 @@ import org.apache.parquet.hadoop.util.ConfigurationUtil;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.parquet.crypto.InternalFileEncryptor;
-import org.apache.parquet.crypto.FileEncDecryptorRetriever;
-import org.apache.parquet.crypto.CryptoClassLoader;
 
 /**
  * OutputFormat to write to a Parquet file
@@ -139,7 +133,6 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   public static final String PAGE_SIZE            = "parquet.page.size";
   public static final String COMPRESSION          = "parquet.compression";
   public static final String WRITE_SUPPORT_CLASS  = "parquet.write.support.class";
-  public static final String WRITE_SUPPORT_CLASS_OVERRIDE  = "parquet.write.support.class.override";
   public static final String DICTIONARY_PAGE_SIZE = "parquet.dictionary.page.size";
   public static final String ENABLE_DICTIONARY    = "parquet.enable.dictionary";
   public static final String VALIDATION           = "parquet.validation";
@@ -185,17 +178,12 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   }
 
   public static Class<?> getWriteSupportClass(Configuration configuration) {
-    if (configuration.get(WRITE_SUPPORT_CLASS_OVERRIDE) != null){
-      return getWriteSupportClass(configuration, WRITE_SUPPORT_CLASS_OVERRIDE);
-    } else if (configuration.get(WRITE_SUPPORT_CLASS) != null){
-      return getWriteSupportClass(configuration, WRITE_SUPPORT_CLASS);
-    } else {
+    final String className = configuration.get(WRITE_SUPPORT_CLASS);
+    if (className == null) {
       return null;
     }
-  }
-
-  public static Class<?> getWriteSupportClass(Configuration configuration, String clazz) {
-    return ConfigurationUtil.getClassFromConfig(configuration, clazz, WriteSupport.class);
+    final Class<?> writeSupportClass = ConfigurationUtil.getClassFromConfig(configuration, WRITE_SUPPORT_CLASS, WriteSupport.class);
+    return writeSupportClass;
   }
 
   public static void setBlockSize(Job job, int blockSize) {
@@ -428,14 +416,8 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
     }
 
     WriteContext init = writeSupport.init(conf);
-    //if data mask is enabled, add mask columns if need
-
-
-    //Try to get encryptor from configured class. If not configured, null is returned.
-    FileEncryptionProperties fileEncryptionProperties = getFileEncryptionPropertiesOrNull(conf, init);
-
     ParquetFileWriter w = new ParquetFileWriter(HadoopOutputFile.fromPath(file, conf),
-        init.getSchema(), Mode.CREATE, blockSize, maxPaddingSize, props.getColumnIndexTruncateLength(), fileEncryptionProperties);
+        init.getSchema(), Mode.CREATE, blockSize, maxPaddingSize, props.getColumnIndexTruncateLength());
     w.start();
 
     float maxLoad = conf.getFloat(ParquetOutputFormat.MEMORY_POOL_RATIO,
