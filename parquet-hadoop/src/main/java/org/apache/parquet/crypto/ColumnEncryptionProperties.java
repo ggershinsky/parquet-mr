@@ -71,6 +71,22 @@ public class ColumnEncryptionProperties {
   }
   
   /**
+   * Convenience builder for encrypted regular (not nested) columns.
+   * @param name
+   */
+  public static Builder builder(String name) {
+    return builder(ColumnPath.get(name), true);
+  }
+  
+  /**
+   * Convenience builder for encrypted columns.
+   * @param path
+   */
+  public static Builder builder(ColumnPath path) {
+    return builder(path, true);
+  }
+  
+  /**
    * 
    * @param path
    * @param encrypt
@@ -111,6 +127,7 @@ public class ColumnEncryptionProperties {
     /**
      * Set a key retrieval metadata.
      * use either withKeyMetaData or withKeyID, not both
+     * @param keyMetadata
      */
     public Builder withKeyMetaData(byte[] keyMetaData) {
       if (null == keyMetaData) {

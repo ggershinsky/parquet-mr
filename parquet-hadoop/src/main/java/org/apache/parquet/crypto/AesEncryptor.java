@@ -40,6 +40,7 @@ public class AesEncryptor implements BlockCipher.Encryptor{
     GCM, CTR
   }
   
+  // Module types
   public static final byte Footer = 0;
   public static final byte ColumnMetaData = 1;
   public static final byte DataPage = 2;
@@ -65,7 +66,13 @@ public class AesEncryptor implements BlockCipher.Encryptor{
   private final byte[] ctrIV;
   private final byte[] localNonce;
 
-
+  /**
+   * 
+   * @param mode GCM or CTR
+   * @param keyBytes encryption key
+   * @throws IllegalArgumentException
+   * @throws IOException
+   */
   public AesEncryptor(Mode mode, byte[] keyBytes) throws IllegalArgumentException, IOException {
     if (null == keyBytes) {
       throw new IllegalArgumentException("Null key bytes");
@@ -104,11 +111,28 @@ public class AesEncryptor implements BlockCipher.Encryptor{
     return encrypt(true, plainText, AAD);
   }
   
+  /**
+   * 
+   * @param writeLength whether to write buffer length (4-byte little endian)
+   * @param plainText
+   * @param AAD
+   * @return
+   * @throws IOException
+   */
   public byte[] encrypt(boolean writeLength, byte[] plainText, byte[] AAD)  throws IOException {
     randomGenerator.nextBytes(localNonce);
     return encrypt(writeLength, plainText, localNonce, AAD);
   }
   
+  /**
+   * 
+   * @param writeLength
+   * @param plainText
+   * @param nonce can be generated locally or supplied. the latter is needed for footer signature verification.
+   * @param AAD
+   * @return
+   * @throws IOException
+   */
   public byte[] encrypt(boolean writeLength, byte[] plainText, byte[] nonce, byte[] AAD)  throws IOException {
     if (nonce.length != NONCE_LENGTH) throw new IOException("Wrong nonce length " + nonce.length);
     int plainTextLength = plainText.length;
@@ -149,28 +173,33 @@ public class AesEncryptor implements BlockCipher.Encryptor{
     return cipherText;
   }
   
-  public static byte[] createModuleAAD(byte[] aadPrefixBytes, byte moduleType, 
+  public static byte[] createModuleAAD(byte[] fileAAD, byte moduleType, 
       short rowGroupOrdinal, short columnOrdinal, short pageOrdinal) {
     byte[] typeOrdinalBytes = new byte[1];
     typeOrdinalBytes[0] = moduleType;
     if (Footer == moduleType) {
-      return concatByteArrays(aadPrefixBytes, typeOrdinalBytes);      
+      return concatByteArrays(fileAAD, typeOrdinalBytes);      
     }
     
     byte[] rowGroupOrdinalBytes = shortToBytesLE(rowGroupOrdinal);
     byte[] columnOrdinalBytes = shortToBytesLE(columnOrdinal);
     if (DataPage != moduleType && DataPageHeader != moduleType) {
-      return concatByteArrays(aadPrefixBytes, typeOrdinalBytes, rowGroupOrdinalBytes, columnOrdinalBytes); 
+      return concatByteArrays(fileAAD, typeOrdinalBytes, rowGroupOrdinalBytes, columnOrdinalBytes); 
     }
     
     byte[] pageOrdinalBytes = shortToBytesLE(pageOrdinal);
-    return concatByteArrays(aadPrefixBytes, typeOrdinalBytes, rowGroupOrdinalBytes, columnOrdinalBytes, pageOrdinalBytes);
+    return concatByteArrays(fileAAD, typeOrdinalBytes, rowGroupOrdinalBytes, columnOrdinalBytes, pageOrdinalBytes);
   }
   
   public static byte[] createFooterAAD(byte[] aadPrefixBytes) {
     return createModuleAAD(aadPrefixBytes, Footer, (short) -1, (short) -1, (short) -1);
   }
   
+  /**
+   * Update last two bytes with new page ordinal (instead of creating new page AAD from scratch)
+   * @param pageAAD
+   * @param newPageOrdinal
+   */
   public static void quickUpdatePageAAD(byte[] pageAAD, short newPageOrdinal) {
     byte[] pageOrdinalBytes = shortToBytesLE(newPageOrdinal);
     int length = pageAAD.length;

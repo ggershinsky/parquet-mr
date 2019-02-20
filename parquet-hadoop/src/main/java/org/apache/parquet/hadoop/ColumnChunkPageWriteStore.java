@@ -369,8 +369,8 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
       BlockCipher.Encryptor pageBlockEncryptor = null;
 
       ColumnPath columnPath = ColumnPath.get(path.getPath());
-      InternalColumnEncryptionSetup columnSetup = fileEncryptor.getColumnSetup(columnPath, true);
-      if (columnSetup.getColumnEncryptionProperties().isEncrypted()) {
+      InternalColumnEncryptionSetup columnSetup = fileEncryptor.getColumnSetup(columnPath, true, columnOrdinal);
+      if (columnSetup.isEncrypted()) {
         headerBlockEncryptor = columnSetup.getMetaDataEncryptor();
         pageBlockEncryptor = columnSetup.getDataEncryptor();
       }

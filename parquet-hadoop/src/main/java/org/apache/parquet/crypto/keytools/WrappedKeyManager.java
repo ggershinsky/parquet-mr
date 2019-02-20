@@ -28,6 +28,7 @@ import java.util.Base64;
 import org.apache.parquet.crypto.AesDecryptor;
 import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.DecryptionKeyRetriever;
+import org.apache.parquet.crypto.KeyAccessDeniedException;
 
 
 public class WrappedKeyManager {
@@ -53,8 +54,7 @@ public class WrappedKeyManager {
       this.unwrapLocally = unwrapLocally;
     }
 
-    @Override
-    public byte[] getKey(byte[] keyMetaData) throws IOException {
+    public byte[] getKey(byte[] keyMetaData) throws IOException, KeyAccessDeniedException {
       String keyMaterial;
       if (null != keyStore) {
         String keyIDinFile = new String(keyMetaData, StandardCharsets.UTF_8);
@@ -64,20 +64,38 @@ public class WrappedKeyManager {
         keyMaterial = new String(keyMetaData, StandardCharsets.UTF_8);
       }
       String[] parts = keyMaterial.split(":");
-      // TODO check parts
+      if (parts.length != 2) throw new IOException("Wrong key material structure: " + keyMaterial);
       String encodedWrappedDatakey = parts[0];
       String masterKeyID = parts[1];
       byte[] dataKey = null;
       if (unwrapLocally) {
         byte[] wrappedDataKey = Base64.getDecoder().decode(encodedWrappedDatakey);
-        String encodedMasterKey = kmsClient.getKey(masterKeyID);
+        String encodedMasterKey = null;
+        try {
+          encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID);
+        }
+        catch (UnsupportedOperationException e) {
+          throw new IOException("KMS client doesnt support key fetching", e);
+        }
+        if (null == encodedMasterKey) {
+          throw new IOException("Failed to get from KMS the master key " + masterKeyID);
+        }
         byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
         AesDecryptor keyDecryptor = new AesDecryptor(AesEncryptor.Mode.GCM, masterKey);
         byte[] AAD = masterKeyID.getBytes(StandardCharsets.UTF_8);
         dataKey = keyDecryptor.decrypt(wrappedDataKey, 0, wrappedDataKey.length, AAD);
       }
       else {
-        String encodedDataKey = kmsClient.unwrapKey(encodedWrappedDatakey, masterKeyID);
+        String encodedDataKey = null;
+        try {
+          encodedDataKey = kmsClient.unwrapDataKeyInServer(encodedWrappedDatakey, masterKeyID);
+        }
+        catch (UnsupportedOperationException e) {
+          throw new IOException("KMS client doesnt support key wrapping", e);
+        }
+        if (null == encodedDataKey) {
+          throw new IOException("Failed to unwrap in KMS with master key " + masterKeyID);
+        }
         dataKey = Base64.getDecoder().decode(encodedDataKey);
       }
       return dataKey;
@@ -108,7 +126,16 @@ public class WrappedKeyManager {
     random.nextBytes(dataKey);
     String encodedWrappedDataKey = null;
     if (wrapLocally) {
-      String encodedMasterKey = kmsClient.getKey(masterKeyID);
+      String encodedMasterKey;
+      try {
+        encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID);
+      } 
+      catch (KeyAccessDeniedException e) {
+        throw new IOException("Unauthorized to fetch key: " + masterKeyID, e);
+      } 
+      catch (UnsupportedOperationException e) {
+        throw new IOException("KMS client doesnt support key fetching", e);
+      }
       byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
       AesEncryptor keyEncryptor = new AesEncryptor(AesEncryptor.Mode.GCM, masterKey);
       byte[] AAD = masterKeyID.getBytes(StandardCharsets.UTF_8);
@@ -117,7 +144,15 @@ public class WrappedKeyManager {
     }
     else {
       String encodedDataKey = Base64.getEncoder().encodeToString(dataKey);
-      encodedWrappedDataKey = kmsClient.wrapKey(encodedDataKey, masterKeyID);
+      try {
+        encodedWrappedDataKey = kmsClient.wrapDataKeyInServer(encodedDataKey, masterKeyID);
+      } 
+      catch (KeyAccessDeniedException e) {
+        throw new IOException("Unauthorized to wrap with master key: " + masterKeyID, e);
+      } 
+      catch (UnsupportedOperationException e) {
+        throw new IOException("KMS client doesnt support key wrapping", e);
+      }
     }
     String wrappedKeyMaterial = encodedWrappedDataKey + ":" + masterKeyID;
     byte[] keyMetadata = null;

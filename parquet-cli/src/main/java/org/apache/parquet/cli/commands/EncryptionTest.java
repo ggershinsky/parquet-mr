@@ -148,7 +148,7 @@ public class EncryptionTest extends BaseCommand {
     // #4  Plaintext footer, default algorithm, key metadata, key retriever, AAD
     encryptionProperties = FileEncryptionProperties.builder(footerKey)
         .withFooterKeyID("fk")
-        .withEncryptedFooter(false)
+        .withPlaintextFooter()
         .withAADPrefix(AADPrefix)
         .withColumnProperties(columnPropertiesMap, false)
         .build();

@@ -66,7 +66,7 @@ public class InternalFileEncryptor {
       }
       return aesGcmEncryptorWithFooterKey;
     }
-    else {
+    else { // Encryptor with column key
       return new AesEncryptor(AesEncryptor.Mode.GCM, columnKey);
     }
   }
@@ -82,18 +82,32 @@ public class InternalFileEncryptor {
       }
       return aesCtrEncryptorWithFooterKey;
     }
-    else {
+    else { // Encryptor with column key
       return new AesEncryptor(AesEncryptor.Mode.CTR, columnKey);
     }
   }
     
-  public InternalColumnEncryptionSetup getColumnSetup(ColumnPath columnPath, boolean createIfNull) throws IOException {
+  /**
+   * 
+   * @param columnPath
+   * @param createIfNull Use true for pages, false for metadata. 
+   * @return
+   * @throws IOException
+   */
+  public InternalColumnEncryptionSetup getColumnSetup(ColumnPath columnPath, boolean createIfNull, short ordinal) throws IOException {
     InternalColumnEncryptionSetup internalColumnProperties = columnMap.get(columnPath);
-    if (null != internalColumnProperties) return internalColumnProperties;
+    if (null != internalColumnProperties) {
+      if (ordinal != internalColumnProperties.getOrdinal()) {
+        throw new IOException("Column ordinal doesnt match " + columnPath + ": " + ordinal + ", "+internalColumnProperties.getOrdinal());
+      }
+      return internalColumnProperties;
+    }
     if (!createIfNull) {
       throw new IOException("No encryption setup found for column " + columnPath);
     }
-    if (fileCryptoMetaDataCreated) throw new IOException("Re-use: No encryption setup for column " + columnPath);
+    if (fileCryptoMetaDataCreated) {
+      throw new IOException("Re-use: No encryption setup for column " + columnPath);
+    }
 
     ColumnEncryptionProperties columnProperties = fileEncryptionProperties.getColumnProperties(columnPath);
     if (null == columnProperties) {
@@ -101,17 +115,17 @@ public class InternalFileEncryptor {
     }
     if (columnProperties.isEncrypted()) {
       if (columnProperties.isEncryptedWithFooterKey()) {
-        internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, 
+        internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, ordinal,
             getDataModuleEncryptor(null), getThriftModuleEncryptor(null));
       }
       else {
-        internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, 
+        internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, ordinal,
             getDataModuleEncryptor(columnProperties.getKeyBytes()), getThriftModuleEncryptor(columnProperties.getKeyBytes()));
       }
     }
     else {
       // unencrypted column
-      internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, null, null);
+      internalColumnProperties = new InternalColumnEncryptionSetup(columnProperties, ordinal, null, null);
     }
     columnMap.put(columnPath, internalColumnProperties);
     return internalColumnProperties;
@@ -131,9 +145,9 @@ public class InternalFileEncryptor {
   }
 
   public boolean encryptColumnMetaData(InternalColumnEncryptionSetup columnSetup) {
-    if (!columnSetup.getColumnEncryptionProperties().isEncrypted()) return false;
+    if (!columnSetup.isEncrypted()) return false;
     if (!encryptFooter) return true;
-    return !columnSetup.getColumnEncryptionProperties().isEncryptedWithFooterKey();
+    return !columnSetup.isEncryptedWithFooterKey();
   }
 
 

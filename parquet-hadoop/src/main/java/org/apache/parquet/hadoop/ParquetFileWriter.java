@@ -65,6 +65,7 @@ import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.FileEncryptionProperties;
+import org.apache.parquet.crypto.InternalColumnEncryptionSetup;
 import org.apache.parquet.crypto.InternalFileEncryptor;
 import org.apache.parquet.example.DummyRecordConverter;
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode;
@@ -713,6 +714,7 @@ public class ParquetFileWriter {
     state = state.endBlock();
     LOG.debug("{}: end block", out.getPos());
     currentBlock.setRowCount(currentRecordCount);
+    currentBlock.setOrdinal((short)blocks.size()); // TODO check ordinal < max short size
     blocks.add(currentBlock);
     columnIndexes.add(currentColumnIndexes);
     offsetIndexes.add(currentOffsetIndexes);
@@ -1011,8 +1013,8 @@ public class ParquetFileWriter {
    */
   public void end(Map<String, String> extraMetaData) throws IOException {
     state = state.end();
-    serializeColumnIndexes(columnIndexes, blocks, out);
-    serializeOffsetIndexes(offsetIndexes, blocks, out);
+    serializeColumnIndexes(columnIndexes, blocks, out, fileEncryptor);
+    serializeOffsetIndexes(offsetIndexes, blocks, out, fileEncryptor);
     LOG.debug("{}: end", out.getPos());
     this.footer = new ParquetMetadata(new FileMetaData(schema, extraMetaData, Version.FULL_VERSION), blocks);
     serializeFooter(footer, out, fileEncryptor);
@@ -1022,10 +1024,12 @@ public class ParquetFileWriter {
   private static void serializeColumnIndexes(
       List<List<ColumnIndex>> columnIndexes,
       List<BlockMetaData> blocks,
-      PositionOutputStream out) throws IOException {
+      PositionOutputStream out,
+      InternalFileEncryptor fileEncryptor) throws IOException {
     LOG.debug("{}: column indexes", out.getPos());
     for (int bIndex = 0, bSize = blocks.size(); bIndex < bSize; ++bIndex) {
-      List<ColumnChunkMetaData> columns = blocks.get(bIndex).getColumns();
+      BlockMetaData block = blocks.get(bIndex);
+      List<ColumnChunkMetaData> columns = block.getColumns();
       List<ColumnIndex> blockColumnIndexes = columnIndexes.get(bIndex);
       for (int cIndex = 0, cSize = columns.size(); cIndex < cSize; ++cIndex) {
         ColumnChunkMetaData column = columns.get(cIndex);
@@ -1034,8 +1038,18 @@ public class ParquetFileWriter {
         if (columnIndex == null) {
           continue;
         }
+        BlockCipher.Encryptor columnIndexEncryptor = null;
+        byte[] columnIndexAAD = null;
+        if (null != fileEncryptor) {
+          InternalColumnEncryptionSetup columnEncryptionSetup = fileEncryptor.getColumnSetup(column.getPath(), false, (short) cIndex);
+          if (columnEncryptionSetup.isEncrypted()) {
+            columnIndexEncryptor = columnEncryptionSetup.getMetaDataEncryptor();
+            columnIndexAAD = AesEncryptor.createModuleAAD(fileEncryptor.getFileAAD(), AesEncryptor.ColumnIndex, 
+                block.getOrdinal(), columnEncryptionSetup.getOrdinal(), (short)-1);
+          }
+        }
         long offset = out.getPos();
-        Util.writeColumnIndex(columnIndex, out);
+        Util.writeColumnIndex(columnIndex, out, columnIndexEncryptor, columnIndexAAD);
         column.setColumnIndexReference(new IndexReference(offset, (int) (out.getPos() - offset)));
       }
     }
@@ -1044,10 +1058,12 @@ public class ParquetFileWriter {
   private static void serializeOffsetIndexes(
       List<List<OffsetIndex>> offsetIndexes,
       List<BlockMetaData> blocks,
-      PositionOutputStream out) throws IOException {
+      PositionOutputStream out,
+      InternalFileEncryptor fileEncryptor) throws IOException {
     LOG.debug("{}: offset indexes", out.getPos());
     for (int bIndex = 0, bSize = blocks.size(); bIndex < bSize; ++bIndex) {
-      List<ColumnChunkMetaData> columns = blocks.get(bIndex).getColumns();
+      BlockMetaData block = blocks.get(bIndex);
+      List<ColumnChunkMetaData> columns = block.getColumns();
       List<OffsetIndex> blockOffsetIndexes = offsetIndexes.get(bIndex);
       for (int cIndex = 0, cSize = columns.size(); cIndex < cSize; ++cIndex) {
         OffsetIndex offsetIndex = blockOffsetIndexes.get(cIndex);
@@ -1055,8 +1071,18 @@ public class ParquetFileWriter {
           continue;
         }
         ColumnChunkMetaData column = columns.get(cIndex);
+        BlockCipher.Encryptor offsetIndexEncryptor = null;
+        byte[] offsetIndexAAD = null;
+        if (null != fileEncryptor) {
+          InternalColumnEncryptionSetup columnEncryptionSetup = fileEncryptor.getColumnSetup(column.getPath(), false, (short) cIndex);
+          if (columnEncryptionSetup.isEncrypted()) {
+            offsetIndexEncryptor = columnEncryptionSetup.getMetaDataEncryptor();
+            offsetIndexAAD = AesEncryptor.createModuleAAD(fileEncryptor.getFileAAD(), AesEncryptor.OffsetIndex, 
+                block.getOrdinal(), columnEncryptionSetup.getOrdinal(), (short)-1);
+          }
+        }
         long offset = out.getPos();
-        Util.writeOffsetIndex(ParquetMetadataConverter.toParquetOffsetIndex(offsetIndex), out);
+        Util.writeOffsetIndex(ParquetMetadataConverter.toParquetOffsetIndex(offsetIndex), out, offsetIndexEncryptor, offsetIndexAAD);
         column.setOffsetIndexReference(new IndexReference(offset, (int) (out.getPos() - offset)));
       }
     }

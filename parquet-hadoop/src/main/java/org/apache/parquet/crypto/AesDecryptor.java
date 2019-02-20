@@ -50,7 +50,13 @@ public class AesDecryptor implements BlockCipher.Decryptor{
   private final byte[] ctrIV;
   private final byte[] nonce;
 
-
+  /**
+   * 
+   * @param mode GCM or CTR
+   * @param keyBytes encryption key
+   * @throws IllegalArgumentException
+   * @throws IOException
+   */
   public AesDecryptor(Mode mode, byte[] keyBytes) throws IllegalArgumentException, IOException {
     if (null == keyBytes) {
       throw new IllegalArgumentException("Null key bytes");
@@ -88,6 +94,15 @@ public class AesDecryptor implements BlockCipher.Decryptor{
     return decrypt(lengthAndCiphertext, cipherTextOffset, cipherTextLength, AAD);
   }
   
+  /**
+   * 
+   * @param ciphertext
+   * @param cipherTextOffset nonce position
+   * @param cipherTextLength with nonce (and tag in case of GCM)
+   * @param AAD
+   * @return
+   * @throws IOException
+   */
   public byte[] decrypt(byte[] ciphertext, int cipherTextOffset, int cipherTextLength, byte[] AAD)  throws IOException {
     // Get the nonce from ciphertext
     if (Mode.GCM == aesMode) {

@@ -62,6 +62,7 @@ import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.page.PageWriter;
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.format.BlockCipher;
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -78,6 +79,7 @@ import org.apache.parquet.schema.MessageTypeParser;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import org.apache.parquet.schema.Types;
 import org.apache.parquet.bytes.HeapByteBufferAllocator;
+
 
 public class TestColumnChunkPageWriteStore {
 
@@ -259,7 +261,11 @@ public class TestColumnChunkPageWriteStore {
           same(OffsetIndexBuilder.getNoOpBuilder()), // Deprecated writePage -> no offset index
           any(),
           any(),
-          any());
+          any(),
+          isNull(BlockCipher.Encryptor.class),
+          eq((short)-1),
+          eq((short)-1),
+          isNull(byte[].class));
     }
   }
 

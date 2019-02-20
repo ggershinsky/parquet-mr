@@ -32,12 +32,14 @@ public class InternalColumnEncryptionSetup {
   private final BlockCipher.Encryptor metadataEncryptor;
   private final BlockCipher.Encryptor dataEncryptor;
   private final ColumnCryptoMetaData columnCryptoMetaData;
+  private final short ordinal;
   
-  InternalColumnEncryptionSetup(ColumnEncryptionProperties encryptionProperties, 
+  InternalColumnEncryptionSetup(ColumnEncryptionProperties encryptionProperties, short ordinal,
       BlockCipher.Encryptor dataEncryptor, BlockCipher.Encryptor metaDataEncryptor) {
     this.encryptionProperties = encryptionProperties;
     this.dataEncryptor = dataEncryptor;
     this.metadataEncryptor = metaDataEncryptor;
+    this.ordinal = ordinal;
     
     if (encryptionProperties.isEncrypted()) {
       if (encryptionProperties.isEncryptedWithFooterKey()) {
@@ -55,9 +57,9 @@ public class InternalColumnEncryptionSetup {
       columnCryptoMetaData = null;
     }
   }
-
-  public ColumnEncryptionProperties getColumnEncryptionProperties() {
-    return encryptionProperties;
+  
+  public boolean isEncrypted() {
+    return encryptionProperties.isEncrypted();
   }
   
   public BlockCipher.Encryptor getMetaDataEncryptor() {
@@ -70,5 +72,13 @@ public class InternalColumnEncryptionSetup {
   
   public ColumnCryptoMetaData getColumnCryptoMetaData() {
     return columnCryptoMetaData;
+  }
+
+  public short getOrdinal() {
+    return ordinal;
+  }
+  
+  public boolean isEncryptedWithFooterKey() {
+    return encryptionProperties.isEncryptedWithFooterKey();
   }
 }

@@ -23,6 +23,7 @@ package org.apache.parquet.crypto;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.parquet.format.EncryptionAlgorithm;
@@ -151,16 +152,33 @@ public class FileEncryptionProperties {
       this.footerKey = footerKey;
     }
     
-    public Builder withEncryptedFooter(boolean encryptedFooter) {
-      this.encryptedFooter = encryptedFooter;
+    /**
+     * Create files with plaintext footer.
+     * If not called, the files will be created with encrypted footer (default).
+     * @return
+     */
+    public Builder withPlaintextFooter() {
+      this.encryptedFooter = false;
       return this;
     }
     
+    /**
+     * Set encryption algorithm.
+     * If not called, files will be encrypted with AES_GCM_V1 (default).
+     * @param parquetCipher
+     * @return
+     */
     public Builder withAlgorithm(ParquetCipher parquetCipher) {
       this.parquetCipher = parquetCipher;
       return this;
     }
     
+    /**
+     * Set a key retrieval metadata (converted from String).
+     * use either withFooterKeyMetaData or withFooterKeyID, not both.
+     * @param keyID will be converted to metadata (UTF-8 array).
+     * @return
+     */
     public Builder withFooterKeyID(String keyID) {
       if (null == keyID) {
         return this;
@@ -168,6 +186,12 @@ public class FileEncryptionProperties {
       return withFooterKeyMetadata(keyID.getBytes(StandardCharsets.UTF_8));
     }
     
+    /**
+     * Set a key retrieval metadata.
+     * use either withFooterKeyMetaData or withFooterKeyID, not both.
+     * @param footerKeyMetadata
+     * @return
+     */
     public Builder withFooterKeyMetadata(byte[] footerKeyMetadata) {
       if (null == footerKeyMetadata) {
         return this;
@@ -180,8 +204,8 @@ public class FileEncryptionProperties {
     }
     
     /**
-     * Set the AES-GCM additional authenticated data (AAD) Prefix.
-     * @param aadBytes
+     * Set the file AAD Prefix.
+     * @param aadPrefixBytes
      */
     public Builder withAADPrefix(byte[] aadPrefixBytes) {
       if (null == aadPrefixBytes) {
@@ -196,12 +220,23 @@ public class FileEncryptionProperties {
     }
     
     /**
-     * Set the AES-GCM additional authenticated data (AAD) Prefix.
-     * @param aadBytes
+     * Skip storing AAD Prefix in file.
+     * If not called, and if AAD Prefix is set, it will be stored.
      */
     public Builder withoutAADPrefixStorage() {
       this.storeAadPrefixInFile = false;
       return this;
+    }
+    
+    /**
+     * Set column encryption properties. 
+     * The map doesn't have to include all columns in a file, 
+     * the rest of the columns will be left unencrypted.
+     * @param columnPropertyMap
+     * @return
+     */
+    public Builder withColumnProperties(Map<ColumnPath, ColumnEncryptionProperties> columnPropertyMap)  {
+      return withColumnProperties(columnPropertyMap, false);
     }
     
     /**
@@ -220,7 +255,8 @@ public class FileEncryptionProperties {
       if (null != this.columnPropertyMap) {
         throw new IllegalArgumentException("Column properties already set");
       }
-      this.columnPropertyMap = columnPropertyMap;
+      // Copy the map to make column properties immutable
+      this.columnPropertyMap = new HashMap<ColumnPath, ColumnEncryptionProperties>(columnPropertyMap);
       this.encryptTheRest = encryptTheRest;
       return this;
     }

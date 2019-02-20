@@ -22,14 +22,14 @@ package org.apache.parquet.crypto;
 
 import java.io.IOException;
 
-public interface DecryptionKeyRetriever {
+public interface AADPrefixVerifier {
 
   /**
-   * Key length must be either 16, 24 or 32 bytes.
-   * @param keyMetaData
-   * @return
-   * @throws KeyAccessDeniedException
+   * Verifies identity (AAD Prefix) of individual file, or of file collection in a data set.
+   * Throws exception if an AAD prefix is wrong.
+   * In a data set, AAD Prefixes should be collected, and then checked for missing files.
+   * @param aadPrefix
    * @throws IOException
    */
-  public byte[] getKey(byte[] keyMetaData) throws KeyAccessDeniedException, IOException;
+  public void check(byte[] aadPrefix) throws IOException;
 }

@@ -21,6 +21,7 @@ package org.apache.parquet.hadoop;
 import static org.apache.parquet.Ints.checkedCast;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -77,14 +78,14 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
     private final BlockCipher.Decryptor blockDecryptor;
     private final boolean hiddenColumn;
     private final String[] columnPath;
+    private final ArrayList<Short> pageList;
     
-    private short pageOrdinal; // TODO replace ordinal with pageIndex
     private byte[] dataPageAAD;
     private byte[] dictionaryPageAAD;
     
     ColumnChunkPageReader(BytesInputDecompressor decompressor, List<DataPage> compressedPages,
         DictionaryPage compressedDictionaryPage, OffsetIndex offsetIndex, long rowCount,
-        String[] columnPath, BlockCipher.Decryptor blockDecryptor, byte[] fileAAD, 
+        String[] columnPath, ArrayList<Short> pageList, BlockCipher.Decryptor blockDecryptor, byte[] fileAAD, 
         short rowGroupOrdinal, short columnOrdinal) {
       this.decompressor = decompressor;
       this.blockDecryptor = blockDecryptor;
@@ -100,9 +101,9 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
       
       this.hiddenColumn = false;
       this.columnPath = columnPath;
-      this.pageOrdinal = -1;
+      this.pageList = pageList;
       if (null != blockDecryptor) {
-        dataPageAAD = AesEncryptor.createModuleAAD(fileAAD, AesEncryptor.DataPage, rowGroupOrdinal, columnOrdinal, pageOrdinal);
+        dataPageAAD = AesEncryptor.createModuleAAD(fileAAD, AesEncryptor.DataPage, rowGroupOrdinal, columnOrdinal, (short) -1);
         dictionaryPageAAD = AesEncryptor.createModuleAAD(fileAAD, AesEncryptor.DictionaryPage, rowGroupOrdinal, columnOrdinal, (short) -1);
       } 
     }
@@ -118,6 +119,14 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
       this.columnPath = columnPath;
       this.offsetIndex = null;
       this.rowCount = 0;
+      this.pageList = null;
+    }
+    
+    private short getPageOrdinal(int pageNumber) {
+      if (null == pageList) {
+        return (short) pageNumber; // TODO check < max short
+      }
+      return pageList.get(pageNumber).shortValue();
     }
 
     @Override
@@ -129,16 +138,15 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
     @Override
     public DataPage readPage() {
       if (hiddenColumn) throw new HiddenColumnException(columnPath);
-      pageOrdinal++;
       if (compressedPages.isEmpty()) {
         // TODO ordinal??
         return null;
       }
-      if (null != blockDecryptor) {
-        AesEncryptor.quickUpdatePageAAD(dataPageAAD, pageOrdinal);
-      }
       DataPage compressedPage = compressedPages.remove(0);
       final int currentPageIndex = pageIndex++;
+      if (null != blockDecryptor) {
+        AesEncryptor.quickUpdatePageAAD(dataPageAAD, getPageOrdinal(currentPageIndex));
+      }
       return compressedPage.accept(new DataPage.Visitor<DataPage>() {
         @Override
         public DataPage visit(DataPageV1 dataPageV1) {
@@ -176,7 +184,7 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
         }
 
         @Override
-        public DataPage visit(DataPageV2 dataPageV2) {
+        public DataPage visit(DataPageV2 dataPageV2) { // TODO simplify (one call to DataPageV2.uncompressed)
           if (!dataPageV2.isCompressed()) {
             if (offsetIndex == null) {
               if (null == blockDecryptor) {

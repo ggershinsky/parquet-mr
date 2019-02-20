@@ -42,6 +42,7 @@ abstract public class ColumnChunkMetaData {
   // Hidden is an encrypted column for which the reader doesn't have a key
   protected boolean hiddenColumn;
   protected ColumnPath path;
+  private short rowGroupOrdinal = -1;
 
   @Deprecated
   public static ColumnChunkMetaData get(
@@ -157,6 +158,14 @@ abstract public class ColumnChunkMetaData {
   public boolean isHiddenColumn() {
     return hiddenColumn;
   }
+  
+  public void setRowGroupOrdinal (short rowGroupOrdinal) {
+    this.rowGroupOrdinal = rowGroupOrdinal;
+  }
+  
+  public short getRowGroupOrdinal() {
+    return rowGroupOrdinal;
+  }
 
   /**
    * @return the offset of the first byte in the chunk
@@ -165,6 +174,7 @@ abstract public class ColumnChunkMetaData {
     if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
     long dictionaryPageOffset = getDictionaryPageOffset();
     long firstDataPageOffset = getFirstDataPageOffset();
+    // TODO Bug! dictionaryPageOffset is not set in Thrift. Always 0 in reader
     if (dictionaryPageOffset > 0 && dictionaryPageOffset < firstDataPageOffset) {
       // if there's a dictionary and it's before the first data page, start from there
       return dictionaryPageOffset;

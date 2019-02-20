@@ -31,11 +31,12 @@ public class FileDecryptionProperties {
   private final byte[] footerKey;
   private final DecryptionKeyRetriever keyRetriever;
   private final byte[] aadPrefix;
+  private final AADPrefixVerifier aadPrefixVerifier;
   private final Map<ColumnPath, ColumnDecryptionProperties> columnPropertyMap;
   private final boolean checkPlaintextFooterIntegrity;
   
   private FileDecryptionProperties(byte[] footerKey, DecryptionKeyRetriever keyRetriever,
-      boolean checkPlaintextFooterIntegrity,  byte[] aadPrefix, 
+      boolean checkPlaintextFooterIntegrity,  byte[] aadPrefix, AADPrefixVerifier aadPrefixVerifier,
       Map<ColumnPath, ColumnDecryptionProperties> columnPropertyMap) {
     
     if ((null == footerKey) && (null == keyRetriever) && (null == columnPropertyMap)) {
@@ -55,6 +56,7 @@ public class FileDecryptionProperties {
     this.keyRetriever = keyRetriever;
     this.aadPrefix = aadPrefix;
     this.columnPropertyMap = columnPropertyMap;
+    this.aadPrefixVerifier = aadPrefixVerifier;
   }
 
   public static Builder builder() {
@@ -65,6 +67,7 @@ public class FileDecryptionProperties {
     private byte[] footerKey;
     private DecryptionKeyRetriever keyRetriever;
     private byte[] aadPrefixBytes;
+    private AADPrefixVerifier aadPrefixVerifier;
     private Map<ColumnPath, ColumnDecryptionProperties> columnPropertyMap;
     private boolean checkPlaintextFooterIntegrity;
     
@@ -73,11 +76,10 @@ public class FileDecryptionProperties {
     }
 
     /**
-     * Set an explicit footer decryption key. If applied on a file that contains footer 
-     * encryption key metadata - 
-     * the metadata will be ignored, the footer will be decrypted with this key.
-     * If explicit key is not set, decryption key will be fetched from key retriever.
-     * @param footerDecryptionKey Key length must be either 16, 24 or 32 bytes. 
+     * Set an explicit footer key. If applied on a file that contains footer key metadata - 
+     * the metadata will be ignored, the footer will be decrypted/verified with this key.
+     * If explicit key is not set, footer key will be fetched from key retriever.
+     * @param footerKey Key length must be either 16, 24 or 32 bytes. 
      */
     public Builder withFooterKey(byte[] footerKey) {
       if (null == footerKey) {
@@ -126,11 +128,11 @@ public class FileDecryptionProperties {
     }
     
     /**
-     * Specify whether integrity of plaintext footer must be verified.
-     * If yes (default), an exception will be thrown in the following runtime situations:
-     * - footer signing key is not available (not passed, or not found in key retriever)
+     * Skip integrity verification of plaintext footers.
+     * If not called, integrity of plaintext footers will be checked in runtime, and an exception will 
+     * be thrown in the following situations:
+     * - footer signing key is not available (not passed, or not found by key retriever)
      * - footer content and signature don't match
-     * @param checkFooterIntegrity
      * @return
      */
     public Builder withoutFooterSignatureVerification() {
@@ -140,10 +142,11 @@ public class FileDecryptionProperties {
     
     
     /**
-     * Explicitly supply the AAD prefix.
+     * Explicitly supply the file AAD prefix.
      * A must when a prefix is used for file encryption, but not stored in file.
-     * If AAD prefix is stored in file, the explicitly supplied value will be ignored.
-     * @param aad
+     * If AAD prefix is stored in file, it will be compared to the explicitly supplied value 
+     * and an exception will be thrown if they differ.
+     * @param aadPrefixBytes
      */
     public Builder withAADPrefix(byte[] aadPrefixBytes) {
       if (null == aadPrefixBytes) {
@@ -156,9 +159,26 @@ public class FileDecryptionProperties {
       return this;
     }
     
+    /**
+     * Set callback for verification of AAD Prefixes stored in file.
+     * If not 
+     * @param aadPrefixVerifier
+     * @return
+     */
+    public Builder withAADPrefixVerifier(AADPrefixVerifier aadPrefixVerifier) {
+      if (null == aadPrefixVerifier) {
+        return this;
+      }
+      if (null != this.aadPrefixVerifier) {
+        throw new IllegalArgumentException("AAD Prefix verifier already set");
+      }
+      this.aadPrefixVerifier = aadPrefixVerifier;
+      return this;
+    }
+    
     public FileDecryptionProperties build() {
       return new FileDecryptionProperties(footerKey, keyRetriever, 
-          checkPlaintextFooterIntegrity, aadPrefixBytes, columnPropertyMap);
+          checkPlaintextFooterIntegrity, aadPrefixBytes, aadPrefixVerifier, columnPropertyMap);
     }
   }
   
@@ -183,5 +203,9 @@ public class FileDecryptionProperties {
   
   public boolean checkFooterIntegrity() {
     return checkPlaintextFooterIntegrity;
+  }
+
+  AADPrefixVerifier getAADPrefixVerifier() {
+    return aadPrefixVerifier;
   }
 }

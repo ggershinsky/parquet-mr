@@ -17,19 +17,14 @@
  * under the License.
  */
 
-
 package org.apache.parquet.crypto;
 
-import java.io.IOException;
+import java.security.KeyException;
 
-public interface DecryptionKeyRetriever {
-
-  /**
-   * Key length must be either 16, 24 or 32 bytes.
-   * @param keyMetaData
-   * @return
-   * @throws KeyAccessDeniedException
-   * @throws IOException
-   */
-  public byte[] getKey(byte[] keyMetaData) throws KeyAccessDeniedException, IOException;
+public class KeyAccessDeniedException extends KeyException {
+  private static final long serialVersionUID = 1L;
+  
+  public KeyAccessDeniedException(String keyID) {
+    super(keyID);
+  }
 }

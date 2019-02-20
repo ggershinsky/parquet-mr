@@ -120,7 +120,7 @@ public class TestEncryption {
     // #4  Plaintext footer, default algorithm, key metadata, key retriever, AAD
     encryptionProperties = FileEncryptionProperties.builder(footerKey)
         .withFooterKeyID("fk")
-        .withEncryptedFooter(false)
+        .withPlaintextFooter()
         .withAADPrefix(AADPrefix)
         .withColumnProperties(columnPropertiesMap, false)
         .build();
@@ -143,7 +143,7 @@ public class TestEncryption {
     SimpleGroupFactory f = new SimpleGroupFactory(schema);
 
     for (int encryptionMode = 0; encryptionMode < numberOfEncryptionModes; encryptionMode++) {
-      Path file = new Path(root, "m_" + encryptionMode + ".parquet.ecnrypted");
+      Path file = new Path(root, "m_" + encryptionMode + ".parquet.encrypted");
       ParquetWriter<Group> writer = new ParquetWriter<Group>(
           file,
           new GroupWriteSupport(),
@@ -166,7 +166,8 @@ public class TestEncryption {
       FileDecryptionProperties fileDecryptionProperties = decryptionPropertiesList[encryptionMode];
       ParquetReader<Group> reader = ParquetReader.builder(new GroupReadSupport(), file).withDecryption(fileDecryptionProperties).withConf(conf).build();
       for (int i = 0; i < 1000; i++) {
-        Group group = reader.read();
+        Group group = null;
+        group= reader.read();
         assertEquals("test" + i, group.getBinary("binary_field", 0).toStringUsingUTF8());
         assertEquals(32, group.getInteger("int32_field", 0));
         assertEquals(64l, group.getLong("int64_field", 0));

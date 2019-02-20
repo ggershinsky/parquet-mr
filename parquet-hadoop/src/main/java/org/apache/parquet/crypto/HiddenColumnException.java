@@ -23,6 +23,11 @@ import java.util.Arrays;
 
 import org.apache.parquet.ParquetRuntimeException;
 
+/**
+ * Reader doesn't have key for encrypted column,
+ * but tries to access its contents
+ *
+ */
 public class HiddenColumnException extends ParquetRuntimeException {
   private static final long serialVersionUID = 1L;
   

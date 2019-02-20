@@ -139,15 +139,15 @@ public class ConvertCSVCommand extends BaseCommand {
   @Parameter(names={"--encrypt-columns"},
       description="Encrypted column list")
   List<String> encryptColumns;
-  
+
   @Parameter(names={"--encrypt-footer"},
       description="Encrypt footer")
   boolean encryptFooter = false;
-  
+
   @Parameter(names={"-a"},
       description="Algorithm")
   String algo = "AES_GCM_V1";
-  
+
 
   @Override
   @SuppressWarnings("unchecked")
@@ -214,7 +214,7 @@ public class ConvertCSVCommand extends BaseCommand {
         for (String column:encryptColumns) {
           byte[] colKeyBytes = new byte[16]; 
           for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i*(c+2));}
-          
+
           console.info("Encrypted Column: " +column);
           ColumnEncryptionProperties encCol = ColumnEncryptionProperties.builder(column, true).withKey(colKeyBytes).withKeyID("kc"+c).build();
           columnMD.put(encCol.getPath(), encCol);
@@ -231,13 +231,23 @@ public class ConvertCSVCommand extends BaseCommand {
       String footerKeyName = "kf";
       byte[] footerKeyMetadata = footerKeyName.getBytes(StandardCharsets.UTF_8);
 
-      eSetup = FileEncryptionProperties.builder(keyBytes)
-          .withEncryptedFooter(encryptFooter)
-          .withFooterKeyMetadata(footerKeyMetadata)
-          .withAlgorithm(ParquetCipher.valueOf(algo))
-          .withAADPrefix(aad)
-          .withColumnProperties(columnMD, false)
-          .build();
+      if (encryptFooter) {
+        eSetup = FileEncryptionProperties.builder(keyBytes)
+            .withFooterKeyMetadata(footerKeyMetadata)
+            .withAlgorithm(ParquetCipher.valueOf(algo))
+            .withAADPrefix(aad)
+            .withColumnProperties(columnMD, false)
+            .build();
+      }
+      else {
+        eSetup = FileEncryptionProperties.builder(keyBytes)
+            .withPlaintextFooter()
+            .withFooterKeyMetadata(footerKeyMetadata)
+            .withAlgorithm(ParquetCipher.valueOf(algo))
+            .withAADPrefix(aad)
+            .withColumnProperties(columnMD, false)
+            .build();
+      }
       console.info("Encrypted Footer: " + encryptFooter);
       console.info("Encryption algorithm: " + algo);
     }
