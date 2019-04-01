@@ -1232,11 +1232,7 @@ public class ParquetMetadataConverter {
       long footerOffset, int combinedFooterLength) throws IOException {
     
     if (!encryptedFooter && !fileMetaData.isSetEncryption_algorithm()) { // Plaintext file
-      if (null != fileDecryptor) {
-        // Done to detect files that were not encrypted by mistake
-        throw new IOException("Applying decryptor on plaintext file");
-      }
-      return; 
+      return;
     }
     
     if (encryptedFooter && (null == fileDecryptor)) { // Encrypted file and footer
@@ -1346,12 +1342,29 @@ public class ParquetMetadataConverter {
   }
 
   public ParquetMetadata readParquetMetadata(final InputStream from, MetadataFilter filter,
-      final InternalFileDecryptor fileDecryptor, final boolean encryptedFooter, 
-      final long footerOffset, final int combinedFooterLength) throws IOException {
-    
+                                             final InternalFileDecryptor fileDecryptor, final boolean encryptedFooter,
+                                             final long footerOffset, final int combinedFooterLength) throws IOException {
+    FileMetaData fileMetaData = readFileMetaDataWithFilter(from, filter, fileDecryptor, encryptedFooter, footerOffset, combinedFooterLength);
+    ParquetMetadata parquetMetadata = fromParquetMetadata(fileMetaData);
+    if (LOG.isDebugEnabled()) LOG.debug(ParquetMetadata.toPrettyJSON(parquetMetadata));
+    return parquetMetadata;
+  }
+
+  public boolean hasCryptoInfoInFooter(final InputStream from, MetadataFilter filter,
+                                       final InternalFileDecryptor fileDecryptor, final boolean encryptedFooter,
+                                       final long footerOffset, final int combinedFooterLength) throws IOException {
+    FileMetaData fileMetaData = readFileMetaDataWithFilter(from, filter, fileDecryptor, encryptedFooter, footerOffset, combinedFooterLength);
+    boolean ret = fileMetaData.getEncryption_algorithm() != null && fileMetaData.getFooter_signing_key_metadata() != null;
+    if (LOG.isDebugEnabled()) LOG.debug("It is {} that footer has crypto information", ret);
+    return ret;
+  }
+
+  private FileMetaData readFileMetaDataWithFilter(final InputStream from, MetadataFilter filter,
+                                                  final InternalFileDecryptor fileDecryptor, final boolean encryptedFooter,
+                                                  final long footerOffset, final int combinedFooterLength) throws IOException {
     final BlockCipher.Decryptor footerDecryptor = (encryptedFooter? fileDecryptor.getFooterDecryptor() : null);
     final byte[] encryptedFooterAAD = (encryptedFooter? AesEncryptor.createFooterAAD(fileDecryptor.getFileAAD()) : null);
-    
+
     FileMetaData fileMetaData = filter.accept(new MetadataFilterVisitor<FileMetaData, IOException>() {
       @Override
       public FileMetaData visit(NoFilter filter) throws IOException {
@@ -1383,9 +1396,7 @@ public class ParquetMetadataConverter {
       }
     });
     LOG.debug("{}", fileMetaData);
-    ParquetMetadata parquetMetadata = fromParquetMetadata(fileMetaData);
-    if (LOG.isDebugEnabled()) LOG.debug(ParquetMetadata.toPrettyJSON(parquetMetadata));
-    return parquetMetadata;
+    return fileMetaData;
   }
 
   public ParquetMetadata fromParquetMetadata(FileMetaData parquetMetadata) throws IOException {
