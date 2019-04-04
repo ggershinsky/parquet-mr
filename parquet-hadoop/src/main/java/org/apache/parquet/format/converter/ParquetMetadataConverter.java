@@ -1359,7 +1359,7 @@ public class ParquetMetadataConverter {
     return ret;
   }
 
-  private FileMetaData readFileMetaDataWithFilter(final InputStream from, MetadataFilter filter,
+  public FileMetaData readFileMetaDataWithFilter(final InputStream from, MetadataFilter filter,
                                                   final InternalFileDecryptor fileDecryptor, final boolean encryptedFooter,
                                                   final long footerOffset, final int combinedFooterLength) throws IOException {
     final BlockCipher.Decryptor footerDecryptor = (encryptedFooter? fileDecryptor.getFooterDecryptor() : null);
