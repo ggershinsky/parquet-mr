@@ -783,6 +783,10 @@ public class ParquetFileReader implements Closeable {
       f.close();
       throw e;
     }
+    if (null != fileDecryptionProperties && fileDecryptor.plaintextFile() && fileDecryptor.plaintextFilesAllowed()) {
+      // Plaintext file. No need in decryptor
+      fileDecryptor = null;
+    }
     this.fileMetaData = footer.getFileMetaData();
     this.blocks = filterRowGroups(footer.getBlocks());
     this.blockIndexStores = listWithNulls(this.blocks.size());

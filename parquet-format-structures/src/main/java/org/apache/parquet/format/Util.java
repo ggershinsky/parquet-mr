@@ -20,6 +20,8 @@
 package org.apache.parquet.format;
 
 import static org.apache.parquet.format.FileMetaData._Fields.CREATED_BY;
+import static org.apache.parquet.format.FileMetaData._Fields.ENCRYPTION_ALGORITHM;
+import static org.apache.parquet.format.FileMetaData._Fields.FOOTER_SIGNING_KEY_METADATA;
 import static org.apache.parquet.format.FileMetaData._Fields.KEY_VALUE_METADATA;
 import static org.apache.parquet.format.FileMetaData._Fields.NUM_ROWS;
 import static org.apache.parquet.format.FileMetaData._Fields.ROW_GROUPS;
@@ -34,8 +36,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.apache.thrift.TBase;
@@ -54,9 +55,6 @@ import org.apache.parquet.format.event.TypedConsumer.StringConsumer;
 /**
  * Utility to read/write metadata
  * We use the TCompactProtocol to serialize metadata
- *
- * @author Julien Le Dem
- *
  */
 public class Util {
 
@@ -148,11 +146,12 @@ public class Util {
    * @param from the stream to read the metadata from
    * @param skipRowGroups whether row groups should be skipped
    * @return the resulting metadata
-   * @throws IOException
+   * @throws IOException if any I/O error occurs during the reading
    */
   public static FileMetaData readFileMetaData(InputStream from, boolean skipRowGroups) throws IOException {
     return readFileMetaData(from, skipRowGroups, (BlockCipher.Decryptor) null, (byte[]) null);
   }
+  
   public static FileMetaData readFileMetaData(InputStream from, boolean skipRowGroups, 
       BlockCipher.Decryptor decryptor, byte[] AAD) throws IOException {
     FileMetaData md = new FileMetaData();
@@ -175,8 +174,6 @@ public class Util {
   /**
    * To read metadata in a streaming fashion.
    *
-   * @author Julien Le Dem
-   *
    */
   public static abstract class FileMetaDataConsumer {
     abstract public void setVersion(int version);
@@ -186,13 +183,11 @@ public class Util {
     abstract public void addKeyValueMetaData(KeyValue kv);
     abstract public void setCreatedBy(String createdBy);
     abstract public void setEncryptionAlgorithm(EncryptionAlgorithm encryptionAlgorithm);
-    abstract public void setFooterSigningKeyMetadata(ByteBuffer footerSigningKeyMetadata);
+    abstract public void setFooterSigningKeyMetadata(byte[] footerSigningKeyMetadata);
   }
 
   /**
    * Simple default consumer that sets the fields
-   *
-   * @author Julien Le Dem
    *
    */
   public static final class DefaultFileMetaDataConsumer extends FileMetaDataConsumer {
@@ -231,14 +226,14 @@ public class Util {
     public void addKeyValueMetaData(KeyValue kv) {
       md.addToKey_value_metadata(kv);
     }
-
+    
     @Override
     public void setEncryptionAlgorithm(EncryptionAlgorithm encryptionAlgorithm) {
       md.setEncryption_algorithm(encryptionAlgorithm);
     }
 
     @Override
-    public void setFooterSigningKeyMetadata(ByteBuffer footerSigningKeyMetadata) {
+    public void setFooterSigningKeyMetadata(byte[] footerSigningKeyMetadata) {
       md.setFooter_signing_key_metadata(footerSigningKeyMetadata);
     }
   }
@@ -285,19 +280,19 @@ public class Util {
         public void consume(String value) {
           consumer.setCreatedBy(value);
         }
-      }).onField(FileMetaData._Fields.ENCRYPTION_ALGORITHM, struct(EncryptionAlgorithm.class, new Consumer<EncryptionAlgorithm>() {
-          @Override
-          public void consume(EncryptionAlgorithm encryptionAlgorithm) {
-            consumer.setEncryptionAlgorithm(encryptionAlgorithm);
-          }
-      })).onField(FileMetaData._Fields.FOOTER_SIGNING_KEY_METADATA, new StringConsumer() {
-          @Override
-          public void consume(String value) {
-            byte[] keyMetadata = value.getBytes(Charset.forName("UTF-8"));
-            consumer.setFooterSigningKeyMetadata(ByteBuffer.wrap(keyMetadata));
-          }
+      }).onField(ENCRYPTION_ALGORITHM, struct(EncryptionAlgorithm.class, new Consumer<EncryptionAlgorithm>() {
+        @Override
+        public void consume(EncryptionAlgorithm encryptionAlgorithm) {
+          consumer.setEncryptionAlgorithm(encryptionAlgorithm);
+        }
+      })).onField(FOOTER_SIGNING_KEY_METADATA, new StringConsumer() {
+        @Override
+        public void consume(String value) {
+          byte[] keyMetadata = value.getBytes(StandardCharsets.UTF_8);
+          consumer.setFooterSigningKeyMetadata(keyMetadata);
+        }
       });
-
+        
       if (!skipRowGroups) {
         eventConsumer = eventConsumer.onField(ROW_GROUPS, listElementsOf(struct(RowGroup.class, new Consumer<RowGroup>() {
           @Override
@@ -372,6 +367,4 @@ public class Util {
     to.write(encryptedBuffer);
   }
 }
-
-
 
