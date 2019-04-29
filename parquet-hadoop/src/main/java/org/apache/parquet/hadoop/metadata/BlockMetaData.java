@@ -46,10 +46,17 @@ public class BlockMetaData {
 
   // Reader side (get parameters from RowGroup structure)
   public BlockMetaData(long fileOffset, long totalCompressedSize) {
-    this.startingPosition = fileOffset;
-    startingPositionSet = true;
-    this.totalCompressedSize = totalCompressedSize;
-    totalCompressedSizeSet = true;
+    // fileOffset is optional, 0 means fileOffset is absent
+    if (fileOffset > 0) {
+      this.startingPosition = fileOffset;
+      startingPositionSet = true;
+    }
+
+    // totalCompressedSize is optional, 0 means totalCompressedSize is absent
+    if (totalCompressedSize > 0) {
+      this.totalCompressedSize = totalCompressedSize;
+      totalCompressedSizeSet = true;
+    }
   }
 
 
