@@ -80,11 +80,11 @@ public class TestEncryption {
     random.nextBytes(columnKey0);
     byte[] columnKey1 = new byte[16];
     random.nextBytes(columnKey1);
-    ColumnEncryptionProperties columnProperties0 = ColumnEncryptionProperties.builder("binary_field", true)
+    ColumnEncryptionProperties columnProperties0 = ColumnEncryptionProperties.builder(ColumnPath.fromDotString("binary_field"))
         .withKey(columnKey0)
         .withKeyID("ck0")
         .build();
-    ColumnEncryptionProperties columnProperties1 = ColumnEncryptionProperties.builder("int32_field", true)
+    ColumnEncryptionProperties columnProperties1 = ColumnEncryptionProperties.builder(ColumnPath.fromDotString("int32_field"))
         .withKey(columnKey1)
         .withKeyID("ck1")
         .build();
@@ -95,7 +95,7 @@ public class TestEncryption {
     encryptionProperties = FileEncryptionProperties.builder(footerKey)
         .withFooterKeyID("fk")
         .withAADPrefix(AADPrefix)
-        .withColumnProperties(columnPropertiesMap, false)
+        .withEncryptedColumns(columnPropertiesMap)
         .build();
     StringKeyIdRetriever keyRetriever = new StringKeyIdRetriever();
     keyRetriever.putKey("fk", footerKey);
@@ -112,7 +112,7 @@ public class TestEncryption {
         .withAlgorithm(ParquetCipher.AES_GCM_CTR_V1)
         .withFooterKeyID("fk")
         .withAADPrefix(AADPrefix)
-        .withColumnProperties(columnPropertiesMap, false)
+        .withEncryptedColumns(columnPropertiesMap)
         .build();
     encryptionPropertiesList[3] = encryptionProperties;
     decryptionPropertiesList[3] = decryptionProperties; // Same decryption properties
@@ -122,7 +122,7 @@ public class TestEncryption {
         .withFooterKeyID("fk")
         .withPlaintextFooter()
         .withAADPrefix(AADPrefix)
-        .withColumnProperties(columnPropertiesMap, false)
+        .withEncryptedColumns(columnPropertiesMap)
         .build();
     encryptionPropertiesList[4] = encryptionProperties;
     decryptionPropertiesList[4] = decryptionProperties; // Same decryption properties
