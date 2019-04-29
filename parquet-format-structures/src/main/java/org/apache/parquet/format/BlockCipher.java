@@ -50,19 +50,6 @@ public interface BlockCipher{
      */
     public byte[] decrypt(byte[] lengthAndCiphertext, byte[] AAD) throws IOException;
     
-    /**
-     * Decrypts the ciphertext.
-     * Make sure the returned plaintext starts at offset 0 and and fills up the byte array.
-     * Input ciphertext starts at offset cipherTextOffset, and has a length of cipherTextLength.
-     * @param ciphertext
-     * @param cipherTextOffset
-     * @param cipherTextLength
-     * @param AAD
-     * @return
-     * @throws IOException
-     */
-    public byte[] decrypt(byte[] ciphertext, int cipherTextOffset, int cipherTextLength, byte[] AAD) throws IOException;
-
     public byte[] decryptInputStream(InputStream from, byte[] AAD) throws IOException;
   }
 }
