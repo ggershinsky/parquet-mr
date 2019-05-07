@@ -216,7 +216,7 @@ public class ConvertCSVCommand extends BaseCommand {
           for (byte i=0; i < 16; i++) {colKeyBytes[i] = (byte) (i*(c+2));}
 
           console.info("Encrypted Column: " +column);
-          ColumnEncryptionProperties encCol = ColumnEncryptionProperties.builder(column, true).withKey(colKeyBytes).withKeyID("kc"+c).build();
+          ColumnEncryptionProperties encCol = ColumnEncryptionProperties.builder(column).withKey(colKeyBytes).withKeyID("kc"+c).build();
           columnMD.put(encCol.getPath(), encCol);
           c++;
         }
@@ -236,7 +236,7 @@ public class ConvertCSVCommand extends BaseCommand {
             .withFooterKeyMetadata(footerKeyMetadata)
             .withAlgorithm(ParquetCipher.valueOf(algo))
             .withAADPrefix(aad)
-            .withColumnProperties(columnMD, false)
+            .withEncryptedColumns(columnMD)
             .build();
       }
       else {
@@ -245,7 +245,7 @@ public class ConvertCSVCommand extends BaseCommand {
             .withFooterKeyMetadata(footerKeyMetadata)
             .withAlgorithm(ParquetCipher.valueOf(algo))
             .withAADPrefix(aad)
-            .withColumnProperties(columnMD, false)
+            .withEncryptedColumns(columnMD)
             .build();
       }
       console.info("Encrypted Footer: " + encryptFooter);
