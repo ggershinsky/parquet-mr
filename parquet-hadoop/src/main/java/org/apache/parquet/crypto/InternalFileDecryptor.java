@@ -20,12 +20,10 @@
 package org.apache.parquet.crypto;
 
 
-import org.apache.hadoop.security.AccessControlException;
 import org.apache.parquet.format.BlockCipher;
 import org.apache.parquet.format.EncryptionAlgorithm;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import java.io.IOException;
-import java.nio.file.AccessDeniedException;
 import java.util.Arrays;
 import java.util.HashMap;
 
@@ -232,8 +230,8 @@ public class InternalFileDecryptor {
           // No explicit column key given via API. Retrieve via key metadata.
           try {
             columnKeyBytes = keyRetriever.getKey(keyMetadata);
-          }
-          catch (KeyAccessDeniedException | AccessControlException | AccessDeniedException e) {
+          } 
+          catch (KeyAccessDeniedException e) {
             // Hidden column: encrypted, but key unavailable
             columnKeyBytes = null;
           }

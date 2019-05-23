@@ -37,7 +37,6 @@ import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.parquet.CorruptDeltaByteArrays;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.Encoding;
-import org.apache.parquet.crypto.HiddenColumnException;
 import org.apache.parquet.filter.UnboundRecordFilter;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.compat.FilterCompat.Filter;
@@ -189,11 +188,7 @@ public class ParquetRecordReader<T> extends RecordReader<Void, T> {
       // this is okay if not using DELTA_BYTE_ARRAY with the bug
       Set<Encoding> encodings = new HashSet<Encoding>();
       for (ColumnChunkMetaData column : block.getColumns()) {
-        try {
-          encodings.addAll(column.getEncodings());
-        } catch (HiddenColumnException e) {
-          LOG.warn("Bypass column {} because it is hidden column so encodings cannot be read", column);
-        }
+        encodings.addAll(column.getEncodings());
       }
       for (Encoding encoding : encodings) {
         if (CorruptDeltaByteArrays.requiresSequentialReads(meta.getCreatedBy(), encoding)) {
