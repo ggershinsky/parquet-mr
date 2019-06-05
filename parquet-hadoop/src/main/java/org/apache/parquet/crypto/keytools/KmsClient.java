@@ -23,9 +23,23 @@ package org.apache.parquet.crypto.keytools;
 
 import java.io.IOException;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.KeyAccessDeniedException;
 
+/**
+ * Implementing class instance should not be created per each Parquet file. 
+ * Rather per tenant or session or dataset, to enable efficient key caching.
+ * The methods need to be thread-safe.
+ *
+ */
 public interface KmsClient {
+  
+  /**
+   * Pass configuration with client-specific parameters
+   * @param conf Hadoop configuration
+   * @throws IOException 
+   */
+  public void setConfiguration(Configuration conf) throws IOException;
   
   /**
    * Supports key wrapping (envelope encryption of data key by master key) inside 
@@ -40,6 +54,8 @@ public interface KmsClient {
    * and application doesn't plan to use local (client-side) wrapping.
    * 
    * IMPORTANT: if implemented, must throw KeyAccessDeniedException when unauthorized to get the key.
+   * If your KMS client code throws runtime exceptions related to access/permission problems
+   * (such as Hadoop AccessControlException), make sure to catch them and throw the KeyAccessDeniedException.
    * 
    * @param keyIdentifier: a string that uniquely identifies the key in KMS: 
    * ranging from a simple key ID, to e.g. a JSON with key ID, KMS instance etc.
@@ -59,6 +75,8 @@ public interface KmsClient {
    * or plan to wrap data keys locally. 
    * 
    * IMPORTANT: if implemented, must throw KeyAccessDeniedException when unauthorized to wrap with the given master key.
+   * If your KMS client code throws runtime exceptions related to access/permission problems
+   * (such as Hadoop AccessControlException), make sure to catch them and throw the KeyAccessDeniedException.
    * 
    * @param dataKey Base64 encoded data key
    * @param masterKeyIdentifier: a string that uniquely identifies the wrapper (master) key in KMS: 
@@ -78,6 +96,8 @@ public interface KmsClient {
    * or plan to wrap data keys locally. 
    * 
    * IMPORTANT: if implemented, must throw KeyAccessDeniedException when unauthorized to unwrap with the given master key.
+   * If your KMS client code throws runtime exceptions related to access/permission problems
+   * (such as Hadoop AccessControlException), make sure to catch them and throw the KeyAccessDeniedException.
    * 
    * @param wrappedDataKey includes everything returned by KMS upon wrapping.
    * @param masterKeyIdentifier: a string that uniquely identifies the wrapper (master) key in KMS: 

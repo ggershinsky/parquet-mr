@@ -25,20 +25,22 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.AesDecryptor;
 import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.DecryptionKeyRetriever;
 import org.apache.parquet.crypto.KeyAccessDeniedException;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 
 
-public class WrappedKeyManager {
+public class WrappedKeyManager implements FileKeyManager {
 
-  private final KmsClient kmsClient;
-  private final boolean wrapLocally;
-  private final WrappedKeyStore wrappedKeyStore;
-  private final String fileID;
+  private KmsClient kmsClient;
+  private boolean wrapLocally;
+  private  WrappedKeyStore wrappedKeyStore;
+  private  String fileID;
 
-  private final SecureRandom random;
+  private  SecureRandom random;
   private short keyCounter;
 
   public static class WrappedKeyRetriever implements DecryptionKeyRetriever {
@@ -102,25 +104,6 @@ public class WrappedKeyManager {
       return dataKey;
     }
   }
-  
-  public WrappedKeyManager(KmsClient kmsClient) {
-    this(kmsClient, !kmsClient.supportsServerSideWrapping(), null, null);
-  }
-
-  public WrappedKeyManager(KmsClient kmsClient, boolean wrapLocally, WrappedKeyStore wrappedKeyStore, String fileID) {
-    if (!wrapLocally && !kmsClient.supportsServerSideWrapping()) {
-      throw new UnsupportedOperationException("KMS client doesn't support server-side wrapping");
-    }
-    if (null != wrappedKeyStore && null == fileID) {
-      throw new IllegalArgumentException("File ID must be supplied to wrapped key store");
-    }
-    this.kmsClient = kmsClient;
-    this.wrapLocally = wrapLocally;
-    this.wrappedKeyStore = wrappedKeyStore;
-    this.fileID = fileID;
-    random = new SecureRandom();
-    keyCounter = 0;
-  }
 
   /**
    * Generates random data encryption key, and creates its metadata.
@@ -129,8 +112,8 @@ public class WrappedKeyManager {
    * @return
    * @throws IOException
    */
-  public KeyWithMetadata generateDataKey(String masterKeyID) throws IOException {
-    byte[] dataKey = new byte[16]; //TODO
+  private KeyWithMetadata generateDataKey(String masterKeyID) throws IOException {
+    byte[] dataKey = new byte[16]; //TODO length. configure via properties
     random.nextBytes(dataKey);
     String encodedWrappedDataKey = null;
     if (wrapLocally) {
@@ -163,6 +146,7 @@ public class WrappedKeyManager {
         throw new IOException("KMS client doesnt support key wrapping", e);
       }
     }
+    // TODO instead of :, use JSON, with a "method/version" fields to identify the key material creation method
     String wrappedKeyMaterial = encodedWrappedDataKey + ":" + masterKeyID;
     byte[] keyMetadata = null;
     if (null != wrappedKeyStore) {
@@ -178,7 +162,46 @@ public class WrappedKeyManager {
     return key;
   }
 
+  @Override
   public DecryptionKeyRetriever getDecryptionKeyRetriever() {
     return new WrappedKeyRetriever(kmsClient, wrapLocally, wrappedKeyStore, fileID);
+  }
+
+  @Override
+  public void initialize(Configuration configuration, KmsClient kmsClient, WrappedKeyStore wrappedKeyStore, String fileID) throws IOException {
+    String localWrap = configuration.getTrimmed("encryption.wrap.locally");
+    if (null == localWrap || localWrap.equalsIgnoreCase("true")) {
+      wrapLocally = true; // true by default
+    }
+    else if (localWrap.equalsIgnoreCase("false")) {
+      wrapLocally = false;
+    }
+    else {
+      throw new IOException("Bad encryption.wrap.locally value: " + localWrap);
+    }
+    if (!wrapLocally && !kmsClient.supportsServerSideWrapping()) {
+      throw new UnsupportedOperationException("KMS client doesn't support server-side wrapping");
+    }
+    this.kmsClient = kmsClient;
+    this.wrappedKeyStore = wrappedKeyStore;
+    this.fileID = fileID;
+    random = new SecureRandom();
+    keyCounter = 0;
+  }
+
+  @Override
+  public KeyWithMetadata getFooterEncryptionKey(String footerMasterKeyID) throws IOException {
+    return generateDataKey(footerMasterKeyID);
+  }
+
+  @Override
+  public KeyWithMetadata getColumnEncryptionKey(ColumnPath column, String columnMasterKeyID) throws IOException {
+    return generateDataKey(columnMasterKeyID);
+  }
+
+  @Override
+  public void close() {
+    // TODO Auto-generated method stub
+    
   }
 }
