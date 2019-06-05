@@ -156,7 +156,7 @@ public class InternalFileDecryptor {
       if (fileHasAadPrefix) {
         if (null != aadPrefixInProperties) {
           if (!Arrays.equals(aadPrefixInProperties, aadPrefixInFile)) {
-            throw new IOException("ADD Prefix in file and in decryption properties is not the same");
+            throw new IOException("AAD Prefix in file and in decryption properties is not the same");
           }
         }
         if (null != aadPrefixVerifier) {
@@ -166,10 +166,10 @@ public class InternalFileDecryptor {
       }
       else {
         if (!mustSupplyAadPrefix && (null != aadPrefixInProperties)) {
-          throw new IOException("ADD Prefix set in decryption properties, but was not used for file encryption");
+          throw new IOException("AAD Prefix set in decryption properties, but was not used for file encryption");
         }
         if (null != aadPrefixVerifier) {
-          throw new IOException("ADD Prefix Verifier is set, but AAD Prefix not found in file");
+          throw new IOException("AAD Prefix Verifier is set, but AAD Prefix not found in file");
         }
       }
       if (null == aadPrefix) {

@@ -38,6 +38,7 @@ import org.apache.parquet.cli.commands.ShowColumnIndexCommand;
 import org.apache.parquet.cli.commands.ShowDictionaryCommand;
 import org.apache.parquet.cli.commands.ShowPagesCommand;
 import org.apache.parquet.cli.commands.ToAvroCommand;
+import org.apache.parquet.cli.commands.EncryptionReaderWriterAllCryptoOptions;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
@@ -93,6 +94,7 @@ public class Main extends Configured implements Tool {
     jc.addCommand("column-index", new ShowColumnIndexCommand(console));
     jc.addCommand("catc", new CatCommandCompare(console, 0)); //TODO remove
     jc.addCommand("et", new EncryptionTest(console, 0)); //TODO remove
+    jc.addCommand("eit", new EncryptionReaderWriterAllCryptoOptions(console));
   }
 
   @Override
