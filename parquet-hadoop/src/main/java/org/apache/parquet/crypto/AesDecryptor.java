@@ -35,15 +35,20 @@ import static org.apache.parquet.crypto.AesEncryptor.SIZE_LENGTH;
 import org.apache.parquet.ShouldNeverHappenException;
 import org.apache.parquet.crypto.AesEncryptor.Mode;
 import org.apache.parquet.format.BlockCipher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedList;
 
 
 public class AesDecryptor implements BlockCipher.Decryptor{
+
+  private static final Logger LOG = LoggerFactory.getLogger(AesDecryptor.class);
 
   private final Mode aesMode;
   private SecretKey aesKey;
@@ -142,7 +147,10 @@ public class AesDecryptor implements BlockCipher.Decryptor{
           inputLength -= CHUNK_LENGTH;
         } 
       }
+      long startTime = System.nanoTime();
       aesCipher.doFinal(ciphertext, inputOffset, inputLength, plainText, outputOffset);
+      Duration duration = Duration.ofNanos(System.nanoTime() - startTime);
+      LOG.info("Decryption duration: {} millis", duration.toMillis());
     }
     catch (GeneralSecurityException e) {
       throw new IOException("Failed to decrypt", e);

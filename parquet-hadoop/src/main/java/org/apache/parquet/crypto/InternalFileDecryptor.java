@@ -23,14 +23,20 @@ package org.apache.parquet.crypto;
 import org.apache.parquet.format.BlockCipher;
 import org.apache.parquet.format.EncryptionAlgorithm;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 
 
 public class InternalFileDecryptor {
-  
+
+  private static final Logger LOG = LoggerFactory.getLogger(InternalFileDecryptor.class);
+
   private final FileDecryptionProperties fileDecryptionProperties;
   private final DecryptionKeyRetriever keyRetriever;
   private final boolean checkPlaintextFooterIntegrity;
@@ -184,7 +190,10 @@ public class InternalFileDecryptor {
           if (null == footerKeyMetaData) throw new IOException("No footer key or key metadata");
           if (null == keyRetriever) throw new IOException("No footer key or key retriever");
           try {
+            long startTime = System.nanoTime();
             footerKey = keyRetriever.getKey(footerKeyMetaData);
+            Duration duration = Duration.ofNanos(System.nanoTime() - startTime);
+            LOG.info("Retrieving the footer key with duration: {} millis", duration.toMillis());
           } 
           catch (KeyAccessDeniedException e) {
             throw new IOException("Footer key: access denied", e);
@@ -241,7 +250,10 @@ public class InternalFileDecryptor {
         if ((null == columnKeyBytes) && (null != keyMetadata) && (null != keyRetriever)) {
           // No explicit column key given via API. Retrieve via key metadata.
           try {
+            long startTime = System.nanoTime();
             columnKeyBytes = keyRetriever.getKey(keyMetadata);
+            Duration duration = Duration.ofNanos(System.nanoTime() - startTime);
+            LOG.info("Retrieving the column key with duration: {} millis", duration.toMillis());
           } 
           catch (KeyAccessDeniedException e) {
             // Hidden column: encrypted, but key unavailable

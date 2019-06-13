@@ -28,14 +28,19 @@ import javax.security.auth.DestroyFailedException;
 import org.apache.parquet.ShouldNeverHappenException;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.format.BlockCipher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedList;
 
 public class AesEncryptor implements BlockCipher.Encryptor{
+
+  private static final Logger LOG = LoggerFactory.getLogger(AesEncryptor.class);
 
   public enum Mode {
     GCM, CTR
@@ -164,7 +169,10 @@ public class AesEncryptor implements BlockCipher.Encryptor{
         outputOffset += written;
         inputLength -= CHUNK_LENGTH;
       }
+      long startTime = System.nanoTime();
       aesCipher.doFinal(plainText, inputOffset, inputLength, cipherText, outputOffset);
+      Duration duration = Duration.ofNanos(System.nanoTime() - startTime);
+      LOG.info("Encrypt duration: {} millis", duration.toMillis());
     }
     catch (GeneralSecurityException e) {
       throw new IOException("Failed to encrypt", e);
