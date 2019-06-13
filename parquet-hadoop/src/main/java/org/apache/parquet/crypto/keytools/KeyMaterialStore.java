@@ -21,13 +21,13 @@
 
 package org.apache.parquet.crypto.keytools;
 
-public class WrappedKeyStore {
+public class KeyMaterialStore {
   
-  public void storeWrappedKey(String wrappedKey, String fileID, String keyIDInFile) {
+  public void storeKeyMaterial(String keyMaterial, String fileID, String keyIDInFile) {
     //TODO
   }
   
-  public String getWrappedKey(String fileID, String keyIDInFile) {
+  public String getKeyMaterial(String fileID, String keyIDInFile) {
     return null; //TODO
   }
 }

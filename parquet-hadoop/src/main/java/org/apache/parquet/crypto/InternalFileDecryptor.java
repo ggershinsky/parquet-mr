@@ -43,7 +43,6 @@ public class InternalFileDecryptor {
   private byte[] fileAAD;
   private boolean encryptedFooter;
   private boolean fileCryptoMetaDataProcessed = false;
-  private boolean allColumnCryptoMetaDataProcessed = false;
   private BlockCipher.Decryptor aesGcmDecryptorWithFooterKey;
   private BlockCipher.Decryptor aesCtrDecryptorWithFooterKey;
   private boolean plaintextFile;
@@ -160,7 +159,7 @@ public class InternalFileDecryptor {
           }
         }
         if (null != aadPrefixVerifier) {
-          aadPrefixVerifier.check(aadPrefixInFile);
+          aadPrefixVerifier.verify(aadPrefixInFile);
         }
         aadPrefix = aadPrefixInFile;
       }
@@ -215,13 +214,7 @@ public class InternalFileDecryptor {
       throw new IOException("Haven't parsed the file crypto metadata yet");
     }
     InternalColumnDecryptionSetup columnDecryptionSetup = columnMap.get(path);
-    if (allColumnCryptoMetaDataProcessed && (null == columnDecryptionSetup)) {
-      throw new IOException("Re-use with unknown column: " + path);
-    }
     if (null != columnDecryptionSetup) {
-      if (!allColumnCryptoMetaDataProcessed) {
-        throw new IOException("File with identical columns: " + path);
-      }
       if (columnDecryptionSetup.isEncrypted() != encrypted) {
         throw new IOException("Re-use: wrong encrypted flag. Column: " + path);
       }
@@ -267,10 +260,6 @@ public class InternalFileDecryptor {
     }
     columnMap.put(path, columnDecryptionSetup);
     return columnDecryptionSetup;
-  }
-
-  public void allColumnCryptoMetaDataProcessed() {
-    allColumnCryptoMetaDataProcessed = true;
   }
   
   public byte[] getFileAAD() {

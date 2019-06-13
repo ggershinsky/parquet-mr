@@ -32,7 +32,7 @@ public class DummyKMS implements KmsClient {
   HashMap<String,String> dataEncryptionKeyMap = null;
 
   @Override
-  public void setConfiguration(Configuration conf) throws IOException {
+  public void initialize(Configuration conf) throws IOException {
     String encryptionKeys[] = conf.getTrimmedStrings("encryption.key.list");
     if (null == encryptionKeys || encryptionKeys.length == 0) {
       throw new IOException("No encryption key list");

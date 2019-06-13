@@ -20,14 +20,23 @@ package org.apache.parquet.hadoop.metadata;
 
 import static org.apache.parquet.column.Encoding.PLAIN_DICTIONARY;
 import static org.apache.parquet.column.Encoding.RLE_DICTIONARY;
+import static org.apache.parquet.format.Util.readColumnMetaData;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.Set;
 
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.EncodingStats;
 import org.apache.parquet.column.statistics.BooleanStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.HiddenColumnException;
+import org.apache.parquet.crypto.InternalColumnDecryptionSetup;
+import org.apache.parquet.crypto.InternalFileDecryptor;
+import org.apache.parquet.format.ColumnMetaData;
+import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.internal.hadoop.metadata.IndexReference;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
@@ -38,9 +47,7 @@ import org.apache.yetus.audience.InterfaceAudience.Private;
  * Column meta data for a block stored in the file footer and passed in the InputSplit
  */
 abstract public class ColumnChunkMetaData {
-  
-  // Hidden is an encrypted column for which the reader doesn't have a key
-  protected boolean hiddenColumn;
+
   protected ColumnPath path;
   private short rowGroupOrdinal = -1;
 
@@ -150,19 +157,19 @@ abstract public class ColumnChunkMetaData {
           totalUncompressedSize);
     }
   }
-  
-  public static ColumnChunkMetaData getHiddenColumn(ColumnPath path) {
-    return new HiddenColumnChunkMetaData(path);
+
+  public static ColumnChunkMetaData getWithEncryptedMetadata(ParquetMetadataConverter parquetMetadataConverter, ColumnPath path, 
+      PrimitiveType type, byte[] encryptedMetadata, byte[] columnKeyMetadata,
+      InternalFileDecryptor fileDecryptor, 
+      short rowGroupOrdinal, short columnOrdinal, String createdBy) {
+    return new EncryptedColumnChunkMetaData(parquetMetadataConverter, path, type, encryptedMetadata, columnKeyMetadata,
+        fileDecryptor, rowGroupOrdinal, columnOrdinal, createdBy);
   }
-  
-  public boolean isHiddenColumn() {
-    return hiddenColumn;
-  }
-  
+
   public void setRowGroupOrdinal (short rowGroupOrdinal) {
     this.rowGroupOrdinal = rowGroupOrdinal;
   }
-  
+
   public short getRowGroupOrdinal() {
     return rowGroupOrdinal;
   }
@@ -171,7 +178,7 @@ abstract public class ColumnChunkMetaData {
    * @return the offset of the first byte in the chunk
    */
   public long getStartingPos() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     long dictionaryPageOffset = getDictionaryPageOffset();
     long firstDataPageOffset = getFirstDataPageOffset();
     // TODO Bug! dictionaryPageOffset is not set in Thrift. Always 0 in reader
@@ -192,10 +199,10 @@ abstract public class ColumnChunkMetaData {
     return (value >= 0) && (value + Integer.MIN_VALUE <= Integer.MAX_VALUE);
   }
 
-  private final EncodingStats encodingStats;
+  protected EncodingStats encodingStats;
 
   // we save 3 references by storing together the column properties that have few distinct values
-  private final ColumnChunkProperties properties;
+  protected ColumnChunkProperties properties;
 
   private IndexReference columnIndexReference;
   private IndexReference offsetIndexReference;
@@ -210,7 +217,7 @@ abstract public class ColumnChunkMetaData {
   }
 
   public CompressionCodecName getCodec() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     return properties.getCodec();
   }
 
@@ -219,7 +226,7 @@ abstract public class ColumnChunkMetaData {
    * @return column identifier
    */
   public ColumnPath getPath() {
-    if (hiddenColumn) return path;
+    if (isHiddenColumn()) return path;
     return properties.getPath();
   }
 
@@ -229,7 +236,7 @@ abstract public class ColumnChunkMetaData {
    */
   @Deprecated
   public PrimitiveTypeName getType() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     return properties.getType();
   }
 
@@ -237,7 +244,7 @@ abstract public class ColumnChunkMetaData {
    * @return the primitive type object of the column
    */
   public PrimitiveType getPrimitiveType() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     return properties.getPrimitiveType();
   }
 
@@ -270,6 +277,10 @@ abstract public class ColumnChunkMetaData {
    * @return the stats for this column
    */
   abstract public Statistics getStatistics();
+
+  abstract public boolean isHiddenColumn();
+
+  abstract public HiddenColumnException getHiddenColumnException();
 
   /**
    * @return the reference to the column index
@@ -309,28 +320,28 @@ abstract public class ColumnChunkMetaData {
    * @return all the encodings used in this column
    */
   public Set<Encoding> getEncodings() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     return properties.getEncodings();
   }
 
   public EncodingStats getEncodingStats() {
-    if (hiddenColumn) throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
     return encodingStats;
   }
 
   @Override
   public String toString() {
-    if (hiddenColumn) return "ColumnMetaData{" + path.toString() +" - Hidden column}";
+    if (isHiddenColumn()) return "ColumnMetaData{" + path.toString() +" - Hidden column}";
     return "ColumnMetaData{" + properties.toString() + ", " + getFirstDataPageOffset() + "}";
   }
-  
+
   public boolean hasDictionaryPage() { 
     EncodingStats stats = getEncodingStats();
     if (stats != null) {
       // ensure there is a dictionary page and that it is used to encode data pages
       return stats.hasDictionaryPages() && stats.hasDictionaryEncodedPages();
     }
-    
+
     Set<Encoding> encodings = getEncodings();
     return (encodings.contains(PLAIN_DICTIONARY) || encodings.contains(RLE_DICTIONARY));
     //return getDictionaryPageOffset() > 0; // TODO rm
@@ -377,7 +388,6 @@ class IntColumnChunkMetaData extends ColumnChunkMetaData {
     this.totalSize = positiveLongToInt(totalSize);
     this.totalUncompressedSize = positiveLongToInt(totalUncompressedSize);
     this.statistics = statistics;
-    this.hiddenColumn = false;
   }
 
   /**
@@ -440,7 +450,17 @@ class IntColumnChunkMetaData extends ColumnChunkMetaData {
    * @return the stats for this column
    */
   public Statistics getStatistics() {
-   return statistics;
+    return statistics;
+  }
+
+  @Override
+  public boolean isHiddenColumn() {
+    return false;
+  }
+
+  @Override
+  public HiddenColumnException getHiddenColumnException() {
+    return null;
   }
 }
 class LongColumnChunkMetaData extends ColumnChunkMetaData {
@@ -483,7 +503,6 @@ class LongColumnChunkMetaData extends ColumnChunkMetaData {
     this.totalSize = totalSize;
     this.totalUncompressedSize = totalUncompressedSize;
     this.statistics = statistics;
-    this.hiddenColumn = false;
   }
 
   /**
@@ -525,45 +544,140 @@ class LongColumnChunkMetaData extends ColumnChunkMetaData {
    * @return the stats for this column
    */
   public Statistics getStatistics() {
-   return statistics;
+    return statistics;
+  }
+
+  @Override
+  public boolean isHiddenColumn() {
+    return false;
+  }
+
+  @Override
+  public HiddenColumnException getHiddenColumnException() {
+    return null;
   }
 }
 
-class HiddenColumnChunkMetaData extends ColumnChunkMetaData {
-  HiddenColumnChunkMetaData(ColumnPath path) {
+class EncryptedColumnChunkMetaData extends ColumnChunkMetaData {
+  private final ParquetMetadataConverter parquetMetadataConverter;
+  private final byte[] encryptedMetadata;
+  private final byte[] columnKeyMetadata;
+  private final InternalFileDecryptor fileDecryptor; 
+  private final short rowGroupOrdinal; 
+  private final short columnOrdinal;
+  private final PrimitiveType primitiveType;
+  private final String createdBy;
+
+  private boolean decrypted;
+  private HiddenColumnException decryptException;
+  private boolean hiddenColumn;
+  private ColumnChunkMetaData shadowColumnChunkMetaData;
+
+
+  EncryptedColumnChunkMetaData(ParquetMetadataConverter parquetMetadataConverter, ColumnPath path, PrimitiveType type, 
+      byte[] encryptedMetadata, byte[] columnKeyMetadata,
+      InternalFileDecryptor fileDecryptor, short rowGroupOrdinal, short columnOrdinal, String createdBy) {
     super((EncodingStats) null, (ColumnChunkProperties) null);
+    this.parquetMetadataConverter = parquetMetadataConverter;
     this.path = path;
-    this.hiddenColumn = true;
+    this.encryptedMetadata = encryptedMetadata;
+    this.columnKeyMetadata = columnKeyMetadata;
+    this.fileDecryptor = fileDecryptor;
+    this.rowGroupOrdinal = rowGroupOrdinal;
+    this.columnOrdinal = columnOrdinal;
+    this.primitiveType = type;
+    this.createdBy = createdBy;
+
+    this.decrypted = false;
+    this.hiddenColumn = false;
+  }
+
+  @Override
+  public boolean isHiddenColumn() {
+
+    if (hiddenColumn) return true;
+    if (decrypted) return false;
+
+    if (null == fileDecryptor) {
+      hiddenColumn = true;
+      decryptException = new HiddenColumnException(Arrays.toString(path.toArray()) + ". Null File Decryptor");
+      return true;
+    }
+
+    // Decrypt the ColumnMetaData
+    InternalColumnDecryptionSetup columnDecryptionSetup;
+    try {
+      columnDecryptionSetup = fileDecryptor.setColumnCryptoMetadata(path, true, false, columnKeyMetadata, columnOrdinal);
+    } catch (IOException e) {
+      decryptException = new HiddenColumnException(Arrays.toString(path.toArray()), e);
+      hiddenColumn = true;
+      return true;
+    }
+
+    // if column key is available, recover ColumnMetaData
+    if (columnDecryptionSetup.isKeyAvailable()) {
+      ColumnMetaData metaData;
+      ByteArrayInputStream tempInputStream = new ByteArrayInputStream(encryptedMetadata);
+      byte[] columnMetaDataAAD = AesEncryptor.createModuleAAD(fileDecryptor.getFileAAD(), AesEncryptor.ColumnMetaData, 
+          rowGroupOrdinal, columnOrdinal, (short) -1);
+      try {
+        metaData = readColumnMetaData(tempInputStream, columnDecryptionSetup.getMetaDataDecryptor(), columnMetaDataAAD);
+      } catch (IOException e) {
+        decryptException = new HiddenColumnException(Arrays.toString(path.toArray()), e);
+        hiddenColumn = true;
+        return true;
+      }
+      decrypted = true;
+      shadowColumnChunkMetaData = parquetMetadataConverter.buildColumnChunkMetaData(metaData, path, primitiveType, createdBy);
+      this.encodingStats = shadowColumnChunkMetaData.encodingStats;
+      this.properties = shadowColumnChunkMetaData.properties;
+      return false;
+    }
+    
+    hiddenColumn = true;
+    decryptException = new HiddenColumnException(Arrays.toString(path.toArray()) + ": Key unavailable"); // TODO needed?
+    return true;
   }
 
   @Override
   public long getFirstDataPageOffset() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getFirstDataPageOffset();
   }
 
   @Override
   public long getDictionaryPageOffset() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getDictionaryPageOffset();
   }
 
   @Override
   public long getValueCount() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getValueCount();
   }
 
   @Override
   public long getTotalUncompressedSize() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getTotalUncompressedSize();
   }
 
   @Override
   public long getTotalSize() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getTotalSize();
   }
 
   @Override
   public Statistics getStatistics() {
-    throw new HiddenColumnException(path.toArray()); 
+    if (isHiddenColumn()) throw getHiddenColumnException(); 
+    return shadowColumnChunkMetaData.getStatistics();
+  }
+
+  @Override
+  public HiddenColumnException getHiddenColumnException() {
+    return decryptException;
   }
 }
 

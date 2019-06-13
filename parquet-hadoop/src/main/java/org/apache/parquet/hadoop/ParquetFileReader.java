@@ -74,6 +74,7 @@ import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.compression.CompressionCodecFactory.BytesInputDecompressor;
 import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.FileDecryptionProperties;
+import org.apache.parquet.crypto.HiddenColumnException;
 import org.apache.parquet.crypto.InternalColumnDecryptionSetup;
 import org.apache.parquet.crypto.InternalFileDecryptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -924,14 +925,16 @@ public class ParquetFileReader implements Closeable {
             currentParts = new ConsecutivePartList(startingPos);
             allParts.add(currentParts);
           }
-          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, false, startingPos, (int)mc.getTotalSize(), (ArrayList<Short>)null));
+          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, false, (HiddenColumnException) null, 
+              startingPos, (int)mc.getTotalSize(), (ArrayList<Short>)null));
         }
         else {
           if (currentParts == null) {
             currentParts = new ConsecutivePartList(0); // First column(s) is (are) hidden
             allParts.add(currentParts);
           }
-          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, true, -1, -1, (ArrayList<Short>)null)); // hidden column chunk
+          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, true, mc.getHiddenColumnException(), 
+              -1, -1, (ArrayList<Short>)null)); // hidden column chunk
         }
       }
     }
@@ -1003,7 +1006,8 @@ public class ParquetFileReader implements Closeable {
             currentParts = new ConsecutivePartList(0); // First column(s) is (are) hidden
             allParts.add(currentParts);
           }
-          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, true, -1, -1, (ArrayList<Short>)null)); // hidden column chunk
+          currentParts.addChunk(new ChunkDescriptor(columnDescriptor, mc, true, mc.getHiddenColumnException(), 
+              -1, -1, (ArrayList<Short>)null)); // hidden column chunk
         }
         else {
           OffsetIndex offsetIndex = ciStore.getOffsetIndex(pathKey);
@@ -1020,8 +1024,8 @@ public class ParquetFileReader implements Closeable {
               currentParts = new ConsecutivePartList(startingPos);
               allParts.add(currentParts);
             }
-            ChunkDescriptor chunkDescriptor = new ChunkDescriptor(columnDescriptor, mc, false, startingPos,
-                (int) range.getLength(), pageList);
+            ChunkDescriptor chunkDescriptor = new ChunkDescriptor(columnDescriptor, mc, false, 
+                (HiddenColumnException) null, startingPos, (int) range.getLength(), pageList);
             currentParts.addChunk(chunkDescriptor);
             builder.setOffsetIndex(chunkDescriptor, filteredOffsetIndex);
           }
@@ -1079,7 +1083,7 @@ public class ParquetFileReader implements Closeable {
 
     // Encrypted file
     if (chunk.descriptor.hiddenColumn) {
-      currentRowGroup.addHiddenColumn(chunk.descriptor.col);
+      currentRowGroup.addHiddenColumn(chunk.descriptor.col, chunk.descriptor.hiddenColumnException);
     }
     else {
       // TODO keep decryptors in ColumnChunkMetaData?
@@ -1582,6 +1586,7 @@ public class ParquetFileReader implements Closeable {
     private final long fileOffset;
     private final int size;
     private final boolean hiddenColumn;
+    private final HiddenColumnException hiddenColumnException;
     private final ArrayList<Short> pageList;
 
     /**
@@ -1594,6 +1599,7 @@ public class ParquetFileReader implements Closeable {
         ColumnDescriptor col,
         ColumnChunkMetaData metadata,
         boolean hidden,
+        HiddenColumnException decryptionException,
         long fileOffset,
         int size,
         ArrayList<Short> pageList) {
@@ -1603,6 +1609,7 @@ public class ParquetFileReader implements Closeable {
       this.fileOffset = fileOffset;
       this.size = size;
       this.hiddenColumn = hidden;
+      this.hiddenColumnException = decryptionException;
       this.pageList = pageList;
     }
 
@@ -1712,7 +1719,7 @@ public class ParquetFileReader implements Closeable {
     }
     Optional<ColumnChunkMetaData> mc = findColumnByPath(block, columnDescriptor.getPath());
 
-    return mc.map(column -> new ChunkDescriptor(columnDescriptor, column, false, column.getStartingPos(), 
+    return mc.map(column -> new ChunkDescriptor(columnDescriptor, column, false, (HiddenColumnException) null, column.getStartingPos(), 
         (int) column.getTotalSize(), (ArrayList<Short>)null)) // TODO hidden?? encryption. + page list!
         .map(chunk -> readChunk(f, chunk));
   }

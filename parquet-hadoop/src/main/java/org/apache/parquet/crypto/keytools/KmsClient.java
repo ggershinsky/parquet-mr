@@ -26,20 +26,15 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.KeyAccessDeniedException;
 
-/**
- * Implementing class instance should not be created per each Parquet file. 
- * Rather per tenant or session or dataset, to enable efficient key caching.
- * The methods need to be thread-safe.
- *
- */
+
 public interface KmsClient {
   
   /**
    * Pass configuration with client-specific parameters
-   * @param conf Hadoop configuration
+   * @param configuration Hadoop configuration
    * @throws IOException 
    */
-  public void setConfiguration(Configuration conf) throws IOException;
+  public void initialize(Configuration configuration) throws IOException;
   
   /**
    * Supports key wrapping (envelope encryption of data key by master key) inside 

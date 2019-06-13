@@ -41,11 +41,11 @@ public interface FileKeyManager {
    * 
    * @param configuration
    * @param kmsClient
-   * @param wrappedKeyStore
+   * @param keyMaterialStore
    * @param fileID
    * @throws IOException
    */
-  public void initialize(Configuration configuration, KmsClient kmsClient, WrappedKeyStore wrappedKeyStore, String fileID) throws IOException;
+  public void initialize(Configuration configuration, KmsClient kmsClient, KeyMaterialStore keyMaterialStore, String fileID) throws IOException;
   
   /**
    * Generates or fetched a column data encryption key, and creates its metadata. 
@@ -71,7 +71,7 @@ public interface FileKeyManager {
   
   /**
    * Wipes keys in memory.
-   * Flushes key metadata to wrapped key store (if in use).
+   * Flushes key material to external store (if in use).
    */
   public void close();
 }

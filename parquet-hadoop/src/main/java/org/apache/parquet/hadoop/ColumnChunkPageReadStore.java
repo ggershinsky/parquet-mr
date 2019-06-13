@@ -77,6 +77,8 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
     
     private final BlockCipher.Decryptor blockDecryptor;
     private final boolean hiddenColumn;
+    private final HiddenColumnException decryptionException;
+    
     private final String[] columnPath;
     private final ArrayList<Short> pageList;
     
@@ -100,6 +102,7 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
       this.rowCount = rowCount;
       
       this.hiddenColumn = false;
+      this.decryptionException = null;
       this.columnPath = columnPath;
       this.pageList = pageList;
       if (null != blockDecryptor) {
@@ -109,13 +112,14 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
     }
     
     // Creates hidden column object
-    ColumnChunkPageReader(String[] columnPath) {
+    ColumnChunkPageReader(String[] columnPath, HiddenColumnException decryptionException) {
       this.decompressor = null;
       this.blockDecryptor = null;
       this.compressedPages = null;
       this.compressedDictionaryPage = null;
       this.valueCount = -1;
       this.hiddenColumn = true;
+      this.decryptionException = decryptionException;
       this.columnPath = columnPath;
       this.offsetIndex = null;
       this.rowCount = 0;
@@ -131,13 +135,13 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
 
     @Override
     public long getTotalValueCount() {
-      if (hiddenColumn) throw new HiddenColumnException(columnPath);
+      if (hiddenColumn) throw decryptionException;
       return valueCount;
     }
 
     @Override
     public DataPage readPage() {
-      if (hiddenColumn) throw new HiddenColumnException(columnPath);
+      if (hiddenColumn) throw decryptionException;
       if (compressedPages.isEmpty()) {
         // TODO ordinal??
         return null;
@@ -270,7 +274,7 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
 
     @Override
     public DictionaryPage readDictionaryPage() {
-      if (hiddenColumn) throw new HiddenColumnException(columnPath);
+      if (hiddenColumn) throw decryptionException;
       if (compressedDictionaryPage == null) {
         return null;
       }
@@ -332,7 +336,7 @@ class ColumnChunkPageReadStore implements PageReadStore, DictionaryPageReadStore
     }
   }
   
-  void addHiddenColumn(ColumnDescriptor path) {
-    addColumn(path, new ColumnChunkPageReader(path.getPath()));
+  void addHiddenColumn(ColumnDescriptor path, HiddenColumnException decryptionException) {
+    addColumn(path, new ColumnChunkPageReader(path.getPath(), decryptionException));
   }
 }
