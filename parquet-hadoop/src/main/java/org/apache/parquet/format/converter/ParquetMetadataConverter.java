@@ -496,11 +496,7 @@ public class ParquetMetadataConverter {
           columnMetaData.getTotalUncompressedSize(),
           columnMetaData.getTotalSize(),
           columnMetaData.getFirstDataPageOffset());
-      metaData.dictionary_page_offset = columnMetaData.getDictionaryPageOffset(); // TODO this is BUG: 
-        // TODO dictionaryPageOffset is not set in Thrift. Always 0 in reader. Fixing this causes test failures.
-      //metaData.setDictionary_page_offset(columnMetaData.getDictionaryPageOffset()); // TODO right thing to do. But causes test failures. 
-        // TODO Must be fixed for ColumnChunkMetaData.getStartingPos to work properly in readers.
-        // TODO DictionaryPageOffset might be wrong on writer side too. Check first.
+      metaData.dictionary_page_offset = columnMetaData.getDictionaryPageOffset();
       if (!columnMetaData.getStatistics().isEmpty()) {
         metaData.setStatistics(toParquetStatistics(columnMetaData.getStatistics()));
       }
@@ -552,10 +548,6 @@ public class ParquetMetadataConverter {
       parquetColumns.add(columnChunk);
     }
     RowGroup rowGroup = new RowGroup(parquetColumns, block.getTotalByteSize(), block.getRowCount());
-    // rowGroup.setFile_offset(block.getStartingPos()); TODO this is right thing to do, but a bug must be fixed: 
-      // TODO dictionaryPageOffset is not set in Thrift. Always 0 in reader
-    rowGroup.setFile_offset(block.getColumns().get(0).getFirstDataPageOffset()); // TODO this is wrong - but makes things work as before. 
-      // TODO Done for TestInputOutputFormatWithPadding to pass.
     rowGroup.setTotal_compressed_size(block.getCompressedSize());
     rowGroup.setOrdinal(rowGroupOrdinal);
     rowGroups.add(rowGroup);
