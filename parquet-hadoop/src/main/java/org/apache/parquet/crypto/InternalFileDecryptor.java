@@ -210,7 +210,7 @@ public class InternalFileDecryptor {
   public InternalColumnDecryptionSetup setColumnCryptoMetadata(ColumnPath path, boolean encrypted, 
       boolean encryptedWithFooterKey, byte[] keyMetadata, short columnOrdinal) throws IOException {
     
-    if (!fileCryptoMetaDataProcessed) {
+    if (!fileCryptoMetaDataProcessed && !plaintextFile) {
       throw new IOException("Haven't parsed the file crypto metadata yet");
     }
     InternalColumnDecryptionSetup columnDecryptionSetup = columnMap.get(path);
