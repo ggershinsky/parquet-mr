@@ -1356,7 +1356,7 @@ public class ParquetMetadataConverter {
               throw new IOException("ColumnMetaData not set in plaintext column");
             }
             columnPath = getPath(metaData);
-            if (null != fileDecryptor) {
+            if (null != fileDecryptor && !fileDecryptor.plaintextFile()) {
               // mark this column as plaintext in file decryptor
               fileDecryptor.setColumnCryptoMetadata(columnPath, false, false, (byte[]) null, columnOrdinal);
             }

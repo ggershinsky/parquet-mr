@@ -1070,7 +1070,7 @@ public class ParquetFileReader implements Closeable {
   }
 
   private void readChunkPages(Chunk chunk, BlockMetaData block) throws IOException {
-    if (null == fileDecryptor) {
+    if (null == fileDecryptor || fileDecryptor.plaintextFile()) {
       currentRowGroup.addColumn(chunk.descriptor.col, chunk.readAllPages());
       return;
     }
@@ -1244,7 +1244,7 @@ public class ParquetFileReader implements Closeable {
     f.seek(ref.getOffset());
     BlockCipher.Decryptor offsetIndexDecryptor = null;
     byte[] offsetIndexAAD = null;
-    if (null != fileDecryptor) {
+    if (null != fileDecryptor && !fileDecryptor.plaintextFile()) {
       if (column.isHiddenColumn()) {
         throw new IOException("Reading OffsetIndex of hidden column " + column.getPath());
       }
