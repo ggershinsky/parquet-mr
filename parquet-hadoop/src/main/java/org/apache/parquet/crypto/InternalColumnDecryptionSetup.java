@@ -28,19 +28,17 @@ public class InternalColumnDecryptionSetup {
   private final ColumnPath columnPath;
   private final boolean isEncrypted;
   private final boolean isEncryptedWithFooterKey;
-  private final boolean keyAvailable;
   private final BlockCipher.Decryptor dataDecryptor;
   private final BlockCipher.Decryptor metaDataDecryptor;
   private final short columnOrdinal;
 
   
-  InternalColumnDecryptionSetup(ColumnPath path, boolean encrypted, boolean keyAvailable,  
+  InternalColumnDecryptionSetup(ColumnPath path, boolean encrypted, 
       boolean isEncryptedWithFooterKey, BlockCipher.Decryptor dataDecryptor, 
       BlockCipher.Decryptor metaDataDecryptor, short columnOrdinal) {
     this.columnPath = path;
     this.isEncrypted = encrypted;
     this.isEncryptedWithFooterKey = isEncryptedWithFooterKey;
-    this.keyAvailable = keyAvailable;
     this.dataDecryptor = dataDecryptor;
     this.metaDataDecryptor = metaDataDecryptor;
     this.columnOrdinal = columnOrdinal;
@@ -48,10 +46,6 @@ public class InternalColumnDecryptionSetup {
 
   public boolean isEncrypted() {
     return isEncrypted;
-  }
-  
-  public boolean isKeyAvailable() {
-    return keyAvailable;
   }
 
   public BlockCipher.Decryptor getDataDecryptor() {

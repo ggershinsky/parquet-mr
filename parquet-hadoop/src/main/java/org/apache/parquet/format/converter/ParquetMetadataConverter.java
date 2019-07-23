@@ -548,6 +548,7 @@ public class ParquetMetadataConverter {
       parquetColumns.add(columnChunk);
     }
     RowGroup rowGroup = new RowGroup(parquetColumns, block.getTotalByteSize(), block.getRowCount());
+    rowGroup.setFile_offset(block.getColumns().get(0).getFirstDataPageOffset());
     rowGroup.setTotal_compressed_size(block.getCompressedSize());
     rowGroup.setOrdinal(rowGroupOrdinal);
     rowGroups.add(rowGroup);
@@ -1357,7 +1358,7 @@ public class ParquetMetadataConverter {
             }
             columnPath = getPath(metaData);
             if (null != fileDecryptor && !fileDecryptor.plaintextFile()) {
-              // mark this column as plaintext in file decryptor
+              // mark this column as plaintext in encrypted file decryptor
               fileDecryptor.setColumnCryptoMetadata(columnPath, false, false, (byte[]) null, columnOrdinal);
             }
           }

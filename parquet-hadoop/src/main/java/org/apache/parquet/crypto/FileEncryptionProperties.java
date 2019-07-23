@@ -265,6 +265,10 @@ public class FileEncryptionProperties {
   public byte[] getFooterKeyMetadata() {
     return footerKeyMetadata;
   }
+  
+  public Map<ColumnPath, ColumnEncryptionProperties> getEncryptedColumns() {
+    return columnPropertyMap;
+  }
 
   public ColumnEncryptionProperties getColumnProperties(ColumnPath columnPath) {
     if (null == columnPropertyMap) {

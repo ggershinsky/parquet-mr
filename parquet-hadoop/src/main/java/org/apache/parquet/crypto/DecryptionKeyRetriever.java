@@ -27,11 +27,10 @@ public interface DecryptionKeyRetriever {
   /**
    * Must be thread-safe, if same KeyRetriever object is passed to multiple file readers.
    * Key length can be either 16, 24 or 32 bytes.
-   * Key will be copied by Parquet; the copy will be wiped out (filled with 0) when the file reader is closed.
-   * Make sure the keys kept in the KeyRetriever object memory are wiped out when this object is no longer needed 
-   * (before it is dereferenced for garbage collection).
+   * Key will be copied by Parquet for each file; the copy will be wiped out (filled with 0) when the file reader is closed.
+   * The keys kept in the KeyRetriever object memory should wiped out (if possible) when this object is no longer needed.
    * If your key retrieval code throws runtime exceptions related to access/permission problems
-   * (such as Hadoop AccessControlException), make sure to catch them and throw the KeyAccessDeniedException.
+   * (such as Hadoop AccessControlException), catch them and throw the KeyAccessDeniedException.
    * @param keyMetaData
    * @return
    * @throws KeyAccessDeniedException

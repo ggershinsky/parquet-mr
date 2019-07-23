@@ -51,6 +51,7 @@ public class AesDecryptor implements BlockCipher.Decryptor{
   private Cipher aesCipher;
   private final byte[] ctrIV;
   private final byte[] nonce;
+  private boolean wipedOut;
 
   /**
    * 
@@ -88,6 +89,7 @@ public class AesDecryptor implements BlockCipher.Decryptor{
     
     nonce = new byte[NONCE_LENGTH];
     if (null != allDecryptors) allDecryptors.add(this);
+    wipedOut = false;
   }
 
   @Override
@@ -107,6 +109,10 @@ public class AesDecryptor implements BlockCipher.Decryptor{
    * @throws IOException
    */
   public byte[] decrypt(byte[] ciphertext, int cipherTextOffset, int cipherTextLength, byte[] AAD)  throws IOException {
+    if (wipedOut) {
+      throw new IOException("AES decryptor is wiped out");
+    }
+    
     // Get the nonce from ciphertext
     if (Mode.GCM == aesMode) {
       System.arraycopy(ciphertext, cipherTextOffset, nonce, 0, NONCE_LENGTH);
@@ -186,6 +192,7 @@ public class AesDecryptor implements BlockCipher.Decryptor{
   }
   
   void wipeOut() {
+    wipedOut = true;
     try {
       aesKey.destroy();
     } catch (DestroyFailedException e) {

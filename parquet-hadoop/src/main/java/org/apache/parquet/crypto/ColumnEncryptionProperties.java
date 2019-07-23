@@ -71,7 +71,9 @@ public class ColumnEncryptionProperties {
   
   
   /**
-   * Convenience builder for encrypted regular (not nested) columns.
+   * Convenience builder for regular (not nested) columns.
+   * To make sure column name is not misspelled or misplaced, 
+   * file writer will verify that column is in file schema.
    * @param name
    */
   public static Builder builder(String name) {
@@ -79,7 +81,9 @@ public class ColumnEncryptionProperties {
   }
   
   /**
-   * Convenience builder for encrypted columns.
+   * Builder for encrypted columns.
+   * To make sure column path is not misspelled or misplaced, 
+   * file writer will verify that column is in file schema.
    * @param path
    */
   public static Builder builder(ColumnPath path) {

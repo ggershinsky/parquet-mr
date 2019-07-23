@@ -43,8 +43,8 @@ public class InternalFileEncryptor {
   private BlockCipher.Encryptor aesGcmEncryptorWithFooterKey;
   private BlockCipher.Encryptor aesCtrEncryptorWithFooterKey;
   private boolean fileCryptoMetaDataCreated;
-  
   private LinkedList<AesEncryptor> allEncryptors;
+  private boolean wipedOut;
 
   public InternalFileEncryptor(FileEncryptionProperties fileEncryptionProperties) throws IOException {
     if (fileEncryptionProperties.isUtilized()) {
@@ -99,6 +99,9 @@ public class InternalFileEncryptor {
    * @throws IOException
    */
   public InternalColumnEncryptionSetup getColumnSetup(ColumnPath columnPath, boolean createIfNull, short ordinal) throws IOException {
+    if (wipedOut) {
+      throw new IOException("File encryptor is wiped out");
+    }
     InternalColumnEncryptionSetup internalColumnProperties = columnMap.get(columnPath);
     if (null != internalColumnProperties) {
       if (ordinal != internalColumnProperties.getOrdinal()) {
@@ -136,12 +139,20 @@ public class InternalFileEncryptor {
   }
 
   public BlockCipher.Encryptor getFooterEncryptor() throws IOException  {
+    if (wipedOut) {
+      throw new IOException("File encryptor is wiped out");
+    }
     if (!encryptFooter) return null;
     return getThriftModuleEncryptor(null);
   }
 
   public FileCryptoMetaData getFileCryptoMetaData() throws IOException {
-    if (!encryptFooter) throw new IOException("Requesting FileCryptoMetaData in file with unencrypted footer");
+    if (!encryptFooter) {
+      throw new IOException("Requesting FileCryptoMetaData in file with unencrypted footer");
+    }
+    if (wipedOut) {
+      throw new IOException("File encryptor is wiped out");
+    }
     FileCryptoMetaData fileCryptoMetaData = new FileCryptoMetaData(algorithm);
     if (null != footerKeyMetadata) fileCryptoMetaData.setKey_metadata(footerKeyMetadata);
     fileCryptoMetaDataCreated = true;
@@ -170,21 +181,33 @@ public class InternalFileEncryptor {
 
 
   public byte[] getFooterSigningKeyMetaData()  throws IOException {
-    if (encryptFooter) throw new IOException("Requesting signing footer key metadata in file with encrypted footer");
+    if (encryptFooter) {
+      throw new IOException("Requesting signing footer key metadata in file with encrypted footer");
+    }
     return footerKeyMetadata;
   }
 
 
   public BlockCipher.Encryptor getSignedFooterEncryptor() throws IOException  {
-    if (encryptFooter) throw new IOException("Requesting signed footer encryptor in file with encrypted footer");
+    if (encryptFooter) {
+      throw new IOException("Requesting signed footer encryptor in file with encrypted footer");
+    }
+    if (wipedOut) {
+      throw new IOException("File encryptor is wiped out");
+    }
     return new AesEncryptor(AesEncryptor.Mode.GCM, footerKey, allEncryptors);
   }
 
 
   public void wipeOutEncryptionKeys() throws IOException {
+    wipedOut = true;
     fileEncryptionProperties.wipeOutEncryptionKeys();
     for (AesEncryptor encryptor : allEncryptors) {
       encryptor.wipeOut();
     }
+  }
+  
+  public boolean isWipedOut() {
+    return wipedOut;
   }
 }

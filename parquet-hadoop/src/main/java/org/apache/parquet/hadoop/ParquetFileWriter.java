@@ -64,6 +64,7 @@ import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.crypto.AesEncryptor;
+import org.apache.parquet.crypto.ColumnEncryptionProperties;
 import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.crypto.InternalColumnEncryptionSetup;
 import org.apache.parquet.crypto.InternalFileEncryptor;
@@ -296,9 +297,9 @@ public class ParquetFileWriter {
   
   //TODO encr param javadoc
   public ParquetFileWriter(OutputFile file, MessageType schema, Mode mode,
-                           long rowGroupSize, int maxPaddingSize, int columnIndexTruncateLength,
-                           FileEncryptionProperties encryptionProperties)
-      throws IOException {
+      long rowGroupSize, int maxPaddingSize, int columnIndexTruncateLength,
+      FileEncryptionProperties encryptionProperties)
+          throws IOException {
     TypeUtil.checkValidWriteSchema(schema);
 
     this.schema = schema;
@@ -316,12 +317,23 @@ public class ParquetFileWriter {
     } else {
       this.out = file.create(blockSize);
     }
-    
+
     if (null != encryptionProperties) {
+      // Verify that every encrypted column is in file schema
+      Map<ColumnPath, ColumnEncryptionProperties> columnEncryptionProperties = encryptionProperties.getEncryptedColumns();
+      if (null != columnEncryptionProperties) { // if null, every column in file schema will be encrypted with footer key
+        for (Map.Entry<ColumnPath, ColumnEncryptionProperties> entry : columnEncryptionProperties.entrySet()) {
+          String[] path = entry.getKey().toArray();
+          if(!schema.containsPath(path)) {
+            throw new IOException("Encrypted column " + Arrays.toString(path) + " not in file schema");
+          }
+        }
+      }
       this.fileEncryptor = new InternalFileEncryptor(encryptionProperties);
     }
     else {
       this.fileEncryptor = null;
+
     }
 
     this.encodingStatsBuilder = new EncodingStats.Builder();

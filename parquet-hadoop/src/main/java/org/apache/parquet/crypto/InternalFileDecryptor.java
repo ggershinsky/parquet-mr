@@ -47,6 +47,7 @@ public class InternalFileDecryptor {
   private BlockCipher.Decryptor aesCtrDecryptorWithFooterKey;
   private boolean plaintextFile;
   private LinkedList<AesDecryptor> allDecryptors;
+  private boolean wipedOut;
 
   public InternalFileDecryptor(FileDecryptionProperties fileDecryptionProperties) throws IOException {
     
@@ -63,6 +64,7 @@ public class InternalFileDecryptor {
     this.aadPrefixVerifier = fileDecryptionProperties.getAADPrefixVerifier();
     this.plaintextFile = false;
     allDecryptors = new LinkedList<AesDecryptor>();
+    wipedOut = false;
   }
   
   private BlockCipher.Decryptor getThriftModuleDecryptor(byte[] columnKey) throws IOException {
@@ -97,6 +99,9 @@ public class InternalFileDecryptor {
     if (!fileCryptoMetaDataProcessed) {
       throw new IOException("Haven't parsed the file crypto metadata yet");
     }
+    if (wipedOut) {
+      throw new IOException("File decryptor is wiped out");
+    }
     InternalColumnDecryptionSetup columnDecryptionSetup = columnMap.get(path);
     if (null == columnDecryptionSetup) {
       throw new IOException("Failed to find decryption setup for column " + path);
@@ -108,12 +113,19 @@ public class InternalFileDecryptor {
     if (!fileCryptoMetaDataProcessed) {
       throw new IOException("Haven't parsed the file crypto metadata yet");
     }
+    if (wipedOut) {
+      throw new IOException("File decryptor is wiped out");
+    }
     if (!encryptedFooter) return null;
     return getThriftModuleDecryptor(null);
   }
 
   public void setFileCryptoMetaData(EncryptionAlgorithm algorithm, 
       boolean encryptedFooter, byte[] footerKeyMetaData) throws IOException {
+    
+    if (wipedOut) {
+      throw new IOException("File decryptor is wiped out");
+    }
     
     // first use of the decryptor
     if (!fileCryptoMetaDataProcessed) {
@@ -213,6 +225,10 @@ public class InternalFileDecryptor {
     if (!fileCryptoMetaDataProcessed) {
       throw new IOException("Haven't parsed the file crypto metadata yet");
     }
+    if (wipedOut) {
+      throw new IOException("File decryptor is wiped out");
+    }
+    
     InternalColumnDecryptionSetup columnDecryptionSetup = columnMap.get(path);
     if (null != columnDecryptionSetup) {
       if (columnDecryptionSetup.isEncrypted() != encrypted) {
@@ -225,14 +241,14 @@ public class InternalFileDecryptor {
     }
     
     if (!encrypted) {
-      columnDecryptionSetup = new InternalColumnDecryptionSetup(path, false, false,  false, null, null, columnOrdinal);
+      columnDecryptionSetup = new InternalColumnDecryptionSetup(path, false,  false, null, null, columnOrdinal);
     }
     else {
       if (encryptedWithFooterKey) {
         if (null == footerKey) {
           throw new IOException("Column " + path + " is encrypted with NULL footer key");
         }
-        columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, true, true, 
+        columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, true, 
             getDataModuleDecryptor(null), getThriftModuleDecryptor(null), columnOrdinal);
       }
       else {
@@ -244,16 +260,15 @@ public class InternalFileDecryptor {
             columnKeyBytes = keyRetriever.getKey(keyMetadata);
           } 
           catch (KeyAccessDeniedException e) {
-            // Hidden column: encrypted, but key unavailable
-            columnKeyBytes = null;
+            throw new IOException("Column " + path + ": key access denied", e);
           }
         }
 
         if (null == columnKeyBytes) { // Hidden column: encrypted, but key unavailable
-          columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, false,  false, null, null, columnOrdinal);
+          throw new IOException("Column " + path + ": key unavailable");
         }
         else { // Key is available
-          columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, true, false, 
+          columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, false, 
               getDataModuleDecryptor(columnKeyBytes), getThriftModuleDecryptor(columnKeyBytes), columnOrdinal);
         }
       }
@@ -269,6 +284,9 @@ public class InternalFileDecryptor {
   public AesEncryptor getSignedFooterEncryptor() throws IOException  {
     if (!fileCryptoMetaDataProcessed) {
       throw new IOException("Haven't parsed the file crypto metadata yet");
+    }
+    if (wipedOut) {
+      throw new IOException("File decryptor is wiped out");
     }
     if (encryptedFooter) {
       throw new IOException("Requesting signed footer encryptor in file with encrypted footer");
@@ -294,10 +312,15 @@ public class InternalFileDecryptor {
   }
   
   public void wipeOutDecryptionKeys() throws IOException {
+    wipedOut = true;
     fileDecryptionProperties.wipeOutDecryptionKeys();
     for (AesDecryptor decryptor : allDecryptors) {
       decryptor.wipeOut();
     }
+  }
+  
+  public boolean isWipedOut() {
+    return wipedOut;
   }
 }
 

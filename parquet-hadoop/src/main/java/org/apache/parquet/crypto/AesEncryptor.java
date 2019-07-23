@@ -66,6 +66,7 @@ public class AesEncryptor implements BlockCipher.Encryptor{
   private final Mode aesMode;
   private final byte[] ctrIV;
   private final byte[] localNonce;
+  private boolean wipedOut;
 
   /**
    * 
@@ -108,6 +109,7 @@ public class AesEncryptor implements BlockCipher.Encryptor{
     
     localNonce = new byte[NONCE_LENGTH];
     if (null != allEncryptors) allEncryptors.add(this);
+    wipedOut = false;
   }
 
   @Override
@@ -138,6 +140,9 @@ public class AesEncryptor implements BlockCipher.Encryptor{
    * @throws IOException
    */
   public byte[] encrypt(boolean writeLength, byte[] plainText, byte[] nonce, byte[] AAD)  throws IOException {
+    if (wipedOut) {
+      throw new IOException("AES encryptor is wiped out");
+    }
     if (nonce.length != NONCE_LENGTH) throw new IOException("Wrong nonce length " + nonce.length);
     int plainTextLength = plainText.length;
     int cipherTextLength = NONCE_LENGTH + plainTextLength + tagLength;
@@ -234,7 +239,7 @@ public class AesEncryptor implements BlockCipher.Encryptor{
   }
 
   public void wipeOut() {
-    
+    wipedOut = true;
     try {
       aesKey.destroy();
     } catch (DestroyFailedException e) {
