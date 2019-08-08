@@ -910,9 +910,14 @@ public class ParquetFileReader implements Closeable {
     // prepare the list of consecutive parts to read them in one scan
     List<ConsecutivePartList> allParts = new ArrayList<ConsecutivePartList>();
     ConsecutivePartList currentParts = null;
-    BenchmarkCounter.incrementTotalBytes(block.getTotalByteSize()); // TODO test vs sum of all column sizes
+    if (null != fileDecryptor) {
+      BenchmarkCounter.incrementTotalBytes(block.getTotalByteSize());
+    }
     for (ColumnChunkMetaData mc : block.getColumns()) {
       ColumnPath pathKey = mc.getPath();
+      if (null == fileDecryptor) {
+        BenchmarkCounter.incrementTotalBytes(mc.getTotalSize());
+      } 
 
       ColumnDescriptor columnDescriptor = paths.get(pathKey);
       if (columnDescriptor != null) { // TODO replace with continue. can happen?!
