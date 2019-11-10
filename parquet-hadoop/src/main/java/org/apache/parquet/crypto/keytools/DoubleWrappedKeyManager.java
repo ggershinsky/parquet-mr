@@ -33,10 +33,6 @@ import org.apache.parquet.crypto.AesDecryptor;
 import org.apache.parquet.crypto.AesEncryptor;
 import org.apache.parquet.crypto.DecryptionKeyRetriever;
 import org.apache.parquet.crypto.KeyAccessDeniedException;
-import org.apache.parquet.crypto.keytools.FileKeyManager;
-import org.apache.parquet.crypto.keytools.KeyMaterialStore;
-import org.apache.parquet.crypto.keytools.KeyWithMetadata;
-import org.apache.parquet.crypto.keytools.KmsClient;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.codehaus.jackson.JsonProcessingException;
 import org.codehaus.jackson.map.ObjectMapper;
@@ -91,9 +87,7 @@ public class DoubleWrappedKeyManager extends FileKeyManager {
   private static final Map<String,KeyEncryptionKey> writeSessionKEKMap = new HashMap<String, KeyEncryptionKey>();
   private static final Map<String,byte[]> readSessionKEKMap = new HashMap<String, byte[]>();
 
-
   private Configuration hadoopConfiguration;
-  private KmsClient kmsClient;
   private boolean wrapLocally;
   private KeyMaterialStore keyMaterialStore;
   private String fileID;
@@ -163,36 +157,32 @@ public class DoubleWrappedKeyManager extends FileKeyManager {
             
             if (unwrapLocally) {
               byte[] wrappedKEK = Base64.getDecoder().decode(encodedWrappedKEK);
-              String encodedMasterKey = null;
+              byte[] masterKey = null;
               try {
-                encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID); // TODO nested sync. Break.
+                masterKey = kmsClient.getKeyFromServer(masterKeyID); // TODO nested sync. Break.
               }
               catch (UnsupportedOperationException e) {
                 throw new IOException("KMS client doesnt support key fetching", e);
               }
-              if (null == encodedMasterKey) {
+              if (null == masterKey) {
                 throw new IOException("Failed to get from KMS the master key " + masterKeyID);
               }
-              byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
-              // TODO key wiping
               AesDecryptor kekDecryptor = new AesDecryptor(AesEncryptor.Mode.GCM, masterKey, null);
               AAD = Base64.getDecoder().decode(encodedKEK_ID);
               kekBytes = kekDecryptor.decrypt(wrappedKEK, 0, wrappedKEK.length, AAD);
+              wipeKey(masterKey);
             }
             else {
-              String encodedKEK = null;
               try {
-                encodedKEK = kmsClient.unwrapDataKeyInServer(encodedWrappedKEK, masterKeyID); // TODO nested sync. Break.
+                kekBytes = kmsClient.unwrapDataKeyInServer(encodedWrappedKEK, masterKeyID); // TODO nested sync. Break.
               }
               catch (UnsupportedOperationException e) {
                 throw new IOException("KMS client doesnt support key wrapping", e);
               }
-              if (null == encodedKEK) {
+              if (null == kekBytes) {
                 throw new IOException("Failed to unwrap in KMS with master key " + masterKeyID);
               }
-              kekBytes = Base64.getDecoder().decode(encodedKEK);
             }
-            
             readSessionKEKMap.put(encodedKEK_ID, kekBytes);
           }
         } // sync readSessionKEKMap
@@ -245,7 +235,18 @@ public class DoubleWrappedKeyManager extends FileKeyManager {
 
   @Override
   public void close() {
-    // TODO Wipe keys
+    synchronized(writeSessionKEKMap) {
+      for (Map.Entry<String, KeyEncryptionKey> keyEntry : writeSessionKEKMap.entrySet()) {
+        wipeKey(keyEntry.getValue().kekBytes);
+      }
+      writeSessionKEKMap.clear();
+    }
+    synchronized (readSessionKEKMap) {
+      for (Map.Entry<String, byte[]> keyEntry : readSessionKEKMap.entrySet()) {
+        wipeKey(keyEntry.getValue());
+      }
+      readSessionKEKMap.clear();
+    }
   }
 
   private KeyWithMetadata generateDataKey(String masterKeyID, boolean addKMSMetadata) throws IOException {
@@ -273,10 +274,10 @@ public class DoubleWrappedKeyManager extends FileKeyManager {
           // Encrypt KEK with CRK (master key)
           String encodedWrappedKEK = null;
           if (wrapLocally) {
-            String encodedMasterKey;
+            byte[] masterKey;
             try {
               // TODO cache here or in kmsClient?
-              encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID); // TODO nested sync. Break
+              masterKey = kmsClient.getKeyFromServer(masterKeyID); // TODO nested sync. Break
             } 
             catch (KeyAccessDeniedException e) {
               throw new IOException("Unauthorized to fetch key: " + masterKeyID, e);
@@ -284,17 +285,15 @@ public class DoubleWrappedKeyManager extends FileKeyManager {
             catch (UnsupportedOperationException e) {
               throw new IOException("KMS client doesnt support key fetching", e);
             }
-            byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
-            // TODO key wiping
             AesEncryptor keyEncryptor = new AesEncryptor(AesEncryptor.Mode.GCM, masterKey, null);
             byte[] AAD = kekID;
             byte[] wrappedKEK = keyEncryptor.encrypt(false, kekBytes, AAD);
+            wipeKey(masterKey);
             encodedWrappedKEK = Base64.getEncoder().encodeToString(wrappedKEK);
           }
           else {
-            String encodedKEK = Base64.getEncoder().encodeToString(kekBytes);
             try {
-              encodedWrappedKEK = kmsClient.wrapDataKeyInServer(encodedKEK, masterKeyID); // TODO nested sync. Break
+              encodedWrappedKEK = kmsClient.wrapDataKeyInServer(kekBytes, masterKeyID); // TODO nested sync. Break
             } 
             catch (KeyAccessDeniedException e) {
               throw new IOException("Unauthorized to wrap with master key: " + masterKeyID, e);

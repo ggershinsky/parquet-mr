@@ -63,7 +63,7 @@ public interface KmsClient {
    * @throws KeyAccessDeniedException
    * @throws IOException
    */
-  public String getKeyFromServer(String keyIdentifier)
+  public byte[] getKeyFromServer(String keyIdentifier)
       throws UnsupportedOperationException, KeyAccessDeniedException, IOException;
 
    /**
@@ -85,7 +85,7 @@ public interface KmsClient {
    * @throws KeyAccessDeniedException
    * @throws IOException
    */
-  public String wrapDataKeyInServer(String dataKey, String masterKeyIdentifier)
+  public String wrapDataKeyInServer(byte[] dataKey, String masterKeyIdentifier)
       throws UnsupportedOperationException, KeyAccessDeniedException, IOException;
   
   /**
@@ -106,6 +106,6 @@ public interface KmsClient {
    * @throws KeyAccessDeniedException
    * @throws IOException
    */
-  public String unwrapDataKeyInServer(String wrappedDataKey, String masterKeyIdentifier)
+  public byte[] unwrapDataKeyInServer(String wrappedDataKey, String masterKeyIdentifier)
       throws UnsupportedOperationException, KeyAccessDeniedException, IOException;
 }

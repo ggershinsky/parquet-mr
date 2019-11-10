@@ -25,10 +25,9 @@ import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.KeyAccessDeniedException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -41,12 +40,17 @@ import java.util.regex.Pattern;
  * wrapDataKeyInServer() with unwrapDataKeyInServer() methods.
  */
 public abstract class RemoteKmsClient implements KmsClient {
-  private static final Logger LOG = LoggerFactory.getLogger(RemoteKmsClient.class);
+  private static final long KEY_CACHE_EXPIRATION_TIME = 10 * 60 * 1000; // 10 minutes
 
   protected String kmsInstanceID;
   protected String kmsURL;
   // Example value that matches the pattern:    vault-instance-1: http://127.0.0.1:8200
   protected Pattern kmsUrlListItemPattern = Pattern.compile("^(\\S+)\\s*:\\s*(\\w*://\\S+)$");
+
+  // Key cache per KmsClient instance, since it is shared by multiple threads with the same
+  // KMS instance id and access token
+  private final int INITIAL_KEY_CACHE_SIZE = 10;
+  private final Map<String, SelfDestructiveKeyCacheEntry> keyCache = new HashMap<String, SelfDestructiveKeyCacheEntry>(INITIAL_KEY_CACHE_SIZE);
 
   /**
    *  Initialize the KMS Client with KMS instance ID and URL.
@@ -113,12 +117,51 @@ public abstract class RemoteKmsClient implements KmsClient {
   @Override
   public abstract boolean supportsServerSideWrapping();
 
+
+  /**
+   * Get a standard key from server. First check if the key is in local key cache and the cache entry is not expired.
+   * If it is - return the key from the cache entry. Otherwise - getKeyFromServerRemoteCall.
+   * @param keyIdentifier: a string that uniquely identifies the key in KMS:
+   * ranging from a simple key ID, to e.g. a JSON with key ID, KMS instance etc.
+   * @return
+   * @throws UnsupportedOperationException
+   * @throws KeyAccessDeniedException
+   * @throws IOException
+   */
+  @Override
+  public byte[] getKeyFromServer(String keyIdentifier)
+          throws KeyAccessDeniedException, IOException {
+    byte[] keyCopy;
+    synchronized (keyCache) {
+      SelfDestructiveKeyCacheEntry keyCacheEntry = keyCache.get(keyIdentifier);
+      byte[] key;
+      if ((null == keyCacheEntry) || (null == (key = keyCacheEntry.getEncryptionKey())) || !keyCacheEntry.isValid()) {
+        // We try to minimize calls to this expensive operation using the cache
+        key = getKeyFromServerRemoteCall(keyIdentifier);
+        final long expirationTimestamp = System.currentTimeMillis() + KEY_CACHE_EXPIRATION_TIME;
+        // Add a new cache entry or overwrite an expired one
+        keyCache.put(keyIdentifier, new SelfDestructiveKeyCacheEntry(key, expirationTimestamp));
+      }
+      keyCopy = Arrays.copyOf(key, key.length);
+    }
+    return keyCopy;
+  }
+
+  /**
+   * Get a standard key from server - call the remote server, without using the key cache.
+   * This method should be implemented by the concrete RemoteKmsClient implementation,
+   * otherwise it throws an UnsupportedOperationException.
+   */
+  protected byte[] getKeyFromServerRemoteCall(String keyIdentifier) throws IOException, KeyAccessDeniedException, UnsupportedOperationException {
+    throw new UnsupportedOperationException();
+  }
+
   /**
    * This method should be implemented by the concrete RemoteKmsClient implementation,
    * otherwise it throws an UnsupportedOperationException.
    */
   @Override
-  public String getKeyFromServer(String keyIdentifier)
+  public String wrapDataKeyInServer(byte[] dataKey, String masterKeyIdentifier)
       throws UnsupportedOperationException, KeyAccessDeniedException, IOException {
     throw new UnsupportedOperationException();
   }
@@ -128,18 +171,49 @@ public abstract class RemoteKmsClient implements KmsClient {
    * otherwise it throws an UnsupportedOperationException.
    */
   @Override
-  public String wrapDataKeyInServer(String dataKey, String masterKeyIdentifier)
+  public byte[] unwrapDataKeyInServer(String wrappedDataKey, String masterKeyIdentifier)
       throws UnsupportedOperationException, KeyAccessDeniedException, IOException {
     throw new UnsupportedOperationException();
   }
 
   /**
-   * This method should be implemented by the concrete RemoteKmsClient implementation,
-   * otherwise it throws an UnsupportedOperationException.
+   * Self destructive key cache entry - if getKey is called on an expired entry, then the key is automatically wiped-out
    */
-  @Override
-  public String unwrapDataKeyInServer(String wrappedDataKey, String masterKeyIdentifier)
-      throws UnsupportedOperationException, KeyAccessDeniedException, IOException {
-    throw new UnsupportedOperationException();
+  private static class SelfDestructiveKeyCacheEntry {
+
+    private byte[] encryptionKey;
+    private final long expirationTimestamp;
+
+    public SelfDestructiveKeyCacheEntry(byte[] encryptionKey, long expirationTimestamp) {
+      this.encryptionKey = encryptionKey;
+      this.expirationTimestamp = expirationTimestamp;
+    }
+
+    /**
+     * Returns the key, if the cache entry is still valid (not expired).
+     * If it not valid - wipes out the key and sets it to null.
+     * @return
+     */
+    public byte[] getEncryptionKey() {
+      if (!isValid()) {
+        byte[] expiredKey = encryptionKey;
+        encryptionKey = null;
+        FileKeyManager.wipeKey(expiredKey);
+      }
+      return encryptionKey;
+    }
+
+    public long getExpirationTimestamp() {
+      return expirationTimestamp;
+    }
+
+    /**
+     * Returns true if the cache entry is not expired yet.
+     * @return
+     */
+    public boolean isValid() {
+      final long now = System.currentTimeMillis();
+      return (now < expirationTimestamp);
+    }
   }
 }

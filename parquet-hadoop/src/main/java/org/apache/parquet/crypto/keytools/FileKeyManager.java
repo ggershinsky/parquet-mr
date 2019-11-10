@@ -22,6 +22,10 @@
 package org.apache.parquet.crypto.keytools;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.DecryptionKeyRetriever;
@@ -30,9 +34,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Management of file encryption keys, and their metadata. 
+ * Management of file encryption keys, and their metadata.
  * For scalability, implementing code is recommended to run locally / not to make remote calls -
- * except for calls to KMS server, via the pre-defined KmsClient interface. 
+ * except for calls to KMS server, via the pre-defined KmsClient interface.
  *
  * Implementing class instance should be created per each Parquet file. The methods don't need to
  * be thread-safe.
@@ -40,6 +44,11 @@ import org.slf4j.LoggerFactory;
 public abstract class FileKeyManager {
   private static final Logger LOG = LoggerFactory.getLogger(FileKeyManager.class);
   public static final String DEFAULT_KMS_INSTANCE_ID = "DEFAULT";
+
+  private static final int INITIAL_KMS_CLIENT_CACHE_SIZE = 5;
+  private static final Map<String, KmsClientCacheEntry> kmsClientPerKmsInstanceCache =
+          new HashMap<String, KmsClientCacheEntry>(INITIAL_KMS_CLIENT_CACHE_SIZE);
+  private static final long KMS_CLIENT_CACHE_ENTRY_DEFAULT_LIFETIME = 10 * 60 * 1000; // 10 minutes
 
   protected KmsClient kmsClient;
   protected String kmsInstanceID;
@@ -114,7 +123,6 @@ public abstract class FileKeyManager {
       }
     }
     KmsClient kmsClient = keyManager.getKmsClient(configuration);
-
     keyManager.initialize(configuration, kmsClient, null, null); //TODO add external storage?
     return keyManager;
   }
@@ -142,13 +150,29 @@ public abstract class FileKeyManager {
    * @throws IOException
    */
   protected static KmsClient getKmsClient(Configuration configuration, String kmsInstanceID) throws IOException {
-    KmsClient kmsClient = instantiateKmsClient(configuration);
-    try {
-      kmsClient.initialize(configuration, kmsInstanceID);
-    } catch (IOException e) {
-      LOG.warn("Cannot create KMS client. If encryption.kms.instance.id not defined, will be expecting to use " +
-              "default KMS instance ID, if relevant, or key metadata from parquet file.");
-      return null;
+    String currentAccessToken = configuration.getTrimmed("encryption.key.access.token", ""); // default for KMS without token
+    KmsClient kmsClient = null;
+    synchronized (kmsClientPerKmsInstanceCache) {
+      // Get from KmsClients cache if entry not expired
+      KmsClientCacheEntry kmsClientCacheEntry = kmsClientPerKmsInstanceCache.get(kmsInstanceID);
+      if (null != kmsClientCacheEntry) {
+        if (kmsClientCacheEntry.isValid(currentAccessToken)) {
+          kmsClient = kmsClientCacheEntry.getKmsClient();
+          return kmsClient;
+        }
+      }
+      kmsClient = instantiateKmsClient(configuration);
+      try {
+        kmsClient.initialize(configuration, kmsInstanceID);
+      } catch (IOException e) {
+        LOG.warn("Cannot create KMS client. If encryption.kms.instance.id not defined, will be expecting to use " +
+                "default KMS instance ID, if relevant, or key metadata from parquet file.", e);
+        return null;
+      }
+      long kmsClientCacheEntryLifetime = configuration.getLong("encryption.cache.entry.lifetime", KMS_CLIENT_CACHE_ENTRY_DEFAULT_LIFETIME);
+      final long expirationTimestamp = System.currentTimeMillis() + kmsClientCacheEntryLifetime;
+      final KmsClientCacheEntry newClientCacheEntry = new KmsClientCacheEntry(kmsClient, currentAccessToken, expirationTimestamp);
+      kmsClientPerKmsInstanceCache.put(kmsInstanceID, newClientCacheEntry);
     }
     return kmsClient;
   }
@@ -167,4 +191,47 @@ public abstract class FileKeyManager {
     }
     return kmsClient;
   }
+
+  protected static void wipeKey(byte[] key) {
+    if (null != key) {
+      Arrays.fill(key, (byte) 0);
+    }
+  }
+
+  /**
+   * Immutable class for KmsClient cache entries
+   */
+  private static class KmsClientCacheEntry {
+    private final KmsClient kmsClient;
+    private final String accessToken;
+    private final long expirationTimestamp;
+
+    private KmsClientCacheEntry(KmsClient kmsClient, String accessToken, long expirationTimestamp) {
+      this.kmsClient = kmsClient;
+      this.accessToken = accessToken;
+      this.expirationTimestamp = expirationTimestamp;
+    }
+    public KmsClient getKmsClient() {
+      return kmsClient;
+    }
+
+    public String getAccessToken() {
+      return accessToken;
+    }
+
+    public long getExpirationTimestamp() {
+      return expirationTimestamp;
+    }
+
+    /**
+     * Cache entry is valid - it is not expired and matches the current access token
+     * @param currentAccessToken
+     * @return
+     */
+    public boolean isValid(String currentAccessToken) {
+      final long now = System.currentTimeMillis();
+      return (now < expirationTimestamp) && Objects.equals(this.accessToken, currentAccessToken);
+    }
+  }
+
 }

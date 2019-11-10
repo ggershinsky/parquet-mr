@@ -116,33 +116,30 @@ public class WrappedKeyManager extends FileKeyManager {
       byte[] dataKey = null;
       if (unwrapLocally) {
         byte[] wrappedDataKey = Base64.getDecoder().decode(encodedWrappedDatakey);
-        String encodedMasterKey = null;
+        byte[] masterKey = null;
         try {
-          encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID);
+          masterKey = kmsClient.getKeyFromServer(masterKeyID);
         }
         catch (UnsupportedOperationException e) {
           throw new IOException("KMS client doesnt support key fetching", e);
         }
-        if (null == encodedMasterKey) {
+        if (null == masterKey) {
           throw new IOException("Failed to get from KMS the master key " + masterKeyID);
         }
-        byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
-        // TODO key wiping
         AesDecryptor keyDecryptor = new AesDecryptor(AesEncryptor.Mode.GCM, masterKey, null);
         dataKey = keyDecryptor.decrypt(wrappedDataKey, 0, wrappedDataKey.length, null);
+        wipeKey(masterKey);
       }
       else {
-        String encodedDataKey = null;
         try {
-          encodedDataKey = kmsClient.unwrapDataKeyInServer(encodedWrappedDatakey, masterKeyID);
+          dataKey = kmsClient.unwrapDataKeyInServer(encodedWrappedDatakey, masterKeyID);
         }
         catch (UnsupportedOperationException e) {
           throw new IOException("KMS client doesnt support key wrapping", e);
         }
-        if (null == encodedDataKey) {
+        if (null == dataKey) {
           throw new IOException("Failed to unwrap in KMS with master key " + masterKeyID);
         }
-        dataKey = Base64.getDecoder().decode(encodedDataKey);
       }
       return dataKey;
     }
@@ -204,9 +201,9 @@ public class WrappedKeyManager extends FileKeyManager {
     random.nextBytes(dataKey);
     String encodedWrappedDataKey = null;
     if (wrapLocally) {
-      String encodedMasterKey;
+      byte[] masterKey;
       try {
-        encodedMasterKey = kmsClient.getKeyFromServer(masterKeyID);
+        masterKey = kmsClient.getKeyFromServer(masterKeyID);
       } 
       catch (KeyAccessDeniedException e) {
         throw new IOException("Unauthorized to fetch key: " + masterKeyID, e);
@@ -214,19 +211,17 @@ public class WrappedKeyManager extends FileKeyManager {
       catch (UnsupportedOperationException e) {
         throw new IOException("KMS client doesnt support key fetching", e);
       }
-      byte[] masterKey = Base64.getDecoder().decode(encodedMasterKey);
-      // TODO key wiping
       AesEncryptor keyEncryptor = new AesEncryptor(AesEncryptor.Mode.GCM, masterKey, null);
       byte[] wrappedDataKey = keyEncryptor.encrypt(false, dataKey, null);
+      wipeKey(masterKey);
       encodedWrappedDataKey = Base64.getEncoder().encodeToString(wrappedDataKey);
     }
     else {
       if (!kmsClient.supportsServerSideWrapping()) {
         throw new UnsupportedOperationException("KMS client doesn't support server-side wrapping");
       }
-      String encodedDataKey = Base64.getEncoder().encodeToString(dataKey);
       try {
-        encodedWrappedDataKey = kmsClient.wrapDataKeyInServer(encodedDataKey, masterKeyID);
+        encodedWrappedDataKey = kmsClient.wrapDataKeyInServer(dataKey, masterKeyID);
       } 
       catch (KeyAccessDeniedException e) {
         throw new IOException("Unauthorized to wrap with master key: " + masterKeyID, e);
@@ -235,7 +230,6 @@ public class WrappedKeyManager extends FileKeyManager {
         throw new IOException("KMS client doesnt support key wrapping", e);
       }
     }
-    
     Map<String, String> keyMaterialMap = new HashMap<String, String>(4);
     keyMaterialMap.put(WRAPPING_METHOD_FIELD, wrappingMethod);
     keyMaterialMap.put(WRAPPING_METHOD_VERSION_FIELD, wrappingMethodVersion);
