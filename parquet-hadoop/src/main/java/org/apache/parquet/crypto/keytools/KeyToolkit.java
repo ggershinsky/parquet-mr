@@ -42,7 +42,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-
 public class KeyToolkit {
 
   public static final String KMS_CLIENT_CLASS_PROPERTY_NAME = "encryption.kms.client.class";
@@ -54,25 +53,25 @@ public class KeyToolkit {
   public static final String WRAP_LOCALLY_PROPERTY_NAME = "encryption.wrap.locally";
   public static final String KEY_MATERIAL_INTERNAL_PROPERTY_NAME = "encryption.key.material.internal.storage";
 
-  public static final String KEY_MATERIAL_TYPE_FIELD = "keyMaterialType";
-  public static final String KEY_MATERIAL_TYPE = "PKMT1";
-  public static final String KEY_MATERIAL_INTERNAL_STORAGE_FIELD = "internalStorage";
-  public static final String KEY_REFERENCE_FIELD = "keyReference";
-  public static final String DOUBLE_WRAPPING_FIELD = "doubleWrapping";
+  static final String KEY_MATERIAL_TYPE_FIELD = "keyMaterialType";
+  static final String KEY_MATERIAL_TYPE = "PKMT1";
+  static final String KEY_MATERIAL_INTERNAL_STORAGE_FIELD = "internalStorage";
+  static final String KEY_REFERENCE_FIELD = "keyReference";
+  static final String DOUBLE_WRAPPING_FIELD = "doubleWrapping";
 
-  public static final String KMS_INSTANCE_ID_FIELD = "kmsInstanceID";
-  public static final String KMS_INSTANCE_URL_FIELD = "kmsInstanceURL";
+  static final String KMS_INSTANCE_ID_FIELD = "kmsInstanceID";
+  static final String KMS_INSTANCE_URL_FIELD = "kmsInstanceURL";
 
-  public static final String MASTER_KEY_ID_FIELD = "masterKeyID";
-  public static final String WRAPPED_DEK_FIELD = "wrappedDEK";
-  public static final String KEK_ID_FIELD = "keyEncryptionKeyID";
-  public static final String WRAPPED_KEK_FIELD = "wrappedKEK";
+  static final String MASTER_KEY_ID_FIELD = "masterKeyID";
+  static final String WRAPPED_DEK_FIELD = "wrappedDEK";
+  static final String KEK_ID_FIELD = "keyEncryptionKeyID";
+  static final String WRAPPED_KEK_FIELD = "wrappedKEK";
 
-  public static final String FOOTER_KEY_ID_IN_FILE = "kf";
-  public static final String KEY_ID_IN_FILE_PREFIX = "k";
+  static final String FOOTER_KEY_ID_IN_FILE = "footerKey";
+  static final String COLUMN_KEY_ID_IN_FILE_PREFIX = "columnKey";
 
-  public static final long DEFAULT_CACHE_ENTRY_LIFETIME = 10 * 60; // 10 minutes
-  public static final int INITIAL_PER_TOKEN_CACHE_SIZE = 5;
+  static final long DEFAULT_CACHE_ENTRY_LIFETIME_SECONDS = 10 * 60; // 10 minutes
+  static final int INITIAL_PER_TOKEN_CACHE_SIZE = 5;
 
   // For every token: a map of KMSInstanceId to kmsClient
   private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, KmsClient>>> kmsClientCachePerToken =
@@ -213,7 +212,6 @@ public class KeyToolkit {
 
     FileKeyUnwrapper.removeCacheEntriesForToken(accessToken);
   }
-
 
   static void checkKmsCacheForExpiredTokens(long cacheEntryLifetime) {
     long now = System.currentTimeMillis();

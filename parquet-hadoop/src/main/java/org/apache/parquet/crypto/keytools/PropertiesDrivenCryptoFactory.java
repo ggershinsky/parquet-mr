@@ -36,10 +36,13 @@ import org.apache.parquet.crypto.ParquetCipher;
 import org.apache.parquet.crypto.ParquetCryptoRuntimeException;
 import org.apache.parquet.hadoop.api.WriteSupport.WriteContext;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.parquet.crypto.keytools.KeyToolkit.stringIsEmpty;
 
 public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactory, DecryptionPropertiesFactory {
+  private static final Logger LOG = LoggerFactory.getLogger(PropertiesDrivenCryptoFactory.class);
 
   public static final String COLUMN_KEYS_PROPERTY_NAME = "encryption.column.keys";
   public static final String FOOTER_KEY_PROPERTY_NAME = "encryption.footer.key";
@@ -59,6 +62,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
     // File shouldn't be encrypted
     if (stringIsEmpty(footerKeyId) && stringIsEmpty(columnKeysStr)) {
+      LOG.debug("Unencrypted file: {}", tempFilePath);
       return null; 
     }
 
@@ -81,17 +85,10 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
     String algo = fileHadoopConfig.getTrimmed(ENCRYPTION_ALGORITHM_PROPERTY_NAME);
     ParquetCipher cipher;
-    if (stringIsEmpty(algo)) {
-      cipher = ParquetCipher.AES_GCM_V1;
-    } else {
-      if (algo.equalsIgnoreCase("AES_GCM_V1")) {
-        cipher = ParquetCipher.AES_GCM_V1;
-      } else if (algo.equalsIgnoreCase("AES_GCM_CTR_V1")) {
-        cipher = ParquetCipher.AES_GCM_CTR_V1;
-      }
-      else {
-        throw new ParquetCryptoRuntimeException("Wrong encryption algorithm: " + algo);
-      }
+    try {
+      cipher = ParquetCipher.valueOf(algo);
+    } catch (IllegalArgumentException e) {
+      throw new ParquetCryptoRuntimeException("Wrong encryption algorithm: " + algo);
     }
 
     byte[] footerKeyBytes = new byte[DEK_LENGTH];
@@ -116,13 +113,19 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
       keyMaterialStore.saveMaterial();
     }
 
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("File encryption properties for {} - algo: {}; footer key id: {}; plaintext footer: {}; "
+          + "internal key material: {}; encrypted columns: {}", 
+          tempFilePath, cipher, footerKeyId, plaintextFooter, keyMaterialInternalStorage, columnKeysStr);
+    }
+
     return propertiesBuilder.build();
   }
 
   private Map<ColumnPath, ColumnEncryptionProperties> getColumnEncryptionProperties(String columnKeys,
       FileKeyWrapper keyWrapper) throws ParquetCryptoRuntimeException {
     if (stringIsEmpty(columnKeys)) {
-      throw new ParquetCryptoRuntimeException("No column keys configured in encryption.column.keys");
+      throw new ParquetCryptoRuntimeException("No column keys configured in " + COLUMN_KEYS_PROPERTY_NAME);
     }
     Map<ColumnPath, ColumnEncryptionProperties> encryptedColumns = new HashMap<ColumnPath, ColumnEncryptionProperties>();
     String keyToColumns[] = columnKeys.split(";");
@@ -134,13 +137,13 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
       String[] parts = curKeyToColumns.split(":");
       if (parts.length != 2) {
-        throw new ParquetCryptoRuntimeException("Incorrect key to columns mapping in encryption.column.keys: [" 
-            + curKeyToColumns + "]");
+        throw new ParquetCryptoRuntimeException("Incorrect key to columns mapping in " + COLUMN_KEYS_PROPERTY_NAME 
+            + ": [" + curKeyToColumns + "]");
       }
 
       String columnKeyId = parts[0].trim();
       if (columnKeyId.isEmpty()) {
-        throw new ParquetCryptoRuntimeException("Empty key name in encryption.column.keys");
+        throw new ParquetCryptoRuntimeException("Empty key name in " + COLUMN_KEYS_PROPERTY_NAME);
       }
 
       String columnNamesStr = parts[1].trim();
@@ -152,7 +155,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
       for (int j = 0; j < columnNames.length; ++j) {
         final String columnName = columnNames[j].trim();
         if (columnName.isEmpty()) {
-          throw new ParquetCryptoRuntimeException("Empty column name in encryption.column.keys for key: " + columnKeyId);
+          throw new ParquetCryptoRuntimeException("Empty column name in " + COLUMN_KEYS_PROPERTY_NAME + " for key: " + columnKeyId);
         }
 
         final ColumnPath columnPath = ColumnPath.fromDotString(columnName);
@@ -172,8 +175,9 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
       }
     }
     if (encryptedColumns.isEmpty()) {
-      throw new ParquetCryptoRuntimeException("No column keys configured in encryption.column.keys");
+      throw new ParquetCryptoRuntimeException("No column keys configured in " + COLUMN_KEYS_PROPERTY_NAME);
     }
+
     return encryptedColumns;
   }
 
@@ -181,7 +185,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
   public FileDecryptionProperties getFileDecryptionProperties(Configuration hadoopConfig, Path filePath)
       throws ParquetCryptoRuntimeException {
 
-    FileKeyMaterialStore keyMaterialStore = null; 
+    FileKeyMaterialStore keyMaterialStore = null;
     boolean keyMaterialInternalStorage = hadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, true);
     if (!keyMaterialInternalStorage) {
       try {
@@ -193,6 +197,10 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
     }
 
     DecryptionKeyRetriever keyRetriever = new FileKeyUnwrapper(hadoopConfig, keyMaterialStore);
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("File decryption properties for {} - internal key material: {}", filePath, keyMaterialInternalStorage);
+    }
 
     return FileDecryptionProperties.builder()
         .withKeyRetriever(keyRetriever)
