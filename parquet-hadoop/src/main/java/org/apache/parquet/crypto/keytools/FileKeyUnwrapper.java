@@ -17,7 +17,6 @@
  * under the License.
  */
 
-
 package org.apache.parquet.crypto.keytools;
 
 import java.io.IOException;
@@ -34,15 +33,18 @@ import org.apache.parquet.crypto.ParquetCryptoRuntimeException;
 import org.apache.parquet.crypto.keytools.KeyToolkit.KeyWithMasterID;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.type.TypeReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.parquet.crypto.keytools.KeyToolkit.stringIsEmpty;
 
 public class FileKeyUnwrapper implements DecryptionKeyRetriever {
-  // For every token: a map of KEK_ID to KEK bytes
-  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String,byte[]>>> KEK_MAP_PER_TOKEN = new ConcurrentHashMap<>();
-
+  private static final Logger LOG = LoggerFactory.getLogger(FileKeyUnwrapper.class);
+  
+  // KEK cache purpose is to minimize the Parquet-KMS interaction. Without it, each thread would have to go to KMS to unwrap a KEK. 
+  // By making cache static, we provide  KEK to all threads (with the same token), if one of them has already unwrapped it.
+  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, byte[]>>> KEK_MAP_PER_TOKEN = new ConcurrentHashMap<>();
   private volatile static long lastKekCacheCleanupTimestamp = System.currentTimeMillis() + 60 * 1000; // grace period of 1 minute
-
   //A map of KEK_ID to KEK - for the current token
   private final ConcurrentMap<String,byte[]> kekPerKekID;
 
@@ -59,7 +61,7 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
     this.keyMaterialStore = keyStore;
 
     cacheEntryLifetime = 1000l * hadoopConfiguration.getLong(KeyToolkit.TOKEN_LIFETIME_PROPERTY_NAME,
-        KeyToolkit.DEFAULT_CACHE_ENTRY_LIFETIME);
+        KeyToolkit.DEFAULT_CACHE_ENTRY_LIFETIME_SECONDS);
 
     // Check cache upon each file reading (clean once in cacheEntryLifetime)
     KeyToolkit.checkKmsCacheForExpiredTokens(cacheEntryLifetime);
@@ -68,18 +70,23 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
     accessToken = hadoopConfiguration.getTrimmed(KeyToolkit.KEY_ACCESS_TOKEN_PROPERTY_NAME, 
         KmsClient.DEFAULT_ACCESS_TOKEN);
 
-    ExpiringCacheEntry<ConcurrentMap<String, byte[]>> kekCacheEntry = KEKMapPerToken.get(accessToken);
-    if (null == KEKCacheEntry || KEKCacheEntry.isExpired()) {
-      synchronized (KEKMapPerToken) {
-        KEKCacheEntry = KEKMapPerToken.get(accessToken);
-        if (null == KEKCacheEntry || KEKCacheEntry.isExpired()) {
-          KEKCacheEntry = new ExpiringCacheEntry<>(new ConcurrentHashMap<String, byte[]>(), cacheEntryLifetime);
-          KEKMapPerToken.put(accessToken, KEKCacheEntry);
+    ExpiringCacheEntry<ConcurrentMap<String, byte[]>> kekCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
+    if (null == kekCacheEntry || kekCacheEntry.isExpired()) {
+      synchronized (KEK_MAP_PER_TOKEN) {
+        kekCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
+        if (null == kekCacheEntry || kekCacheEntry.isExpired()) {
+          kekCacheEntry = new ExpiringCacheEntry<>(new ConcurrentHashMap<String, byte[]>(), cacheEntryLifetime);
+          KEK_MAP_PER_TOKEN.put(accessToken, kekCacheEntry);
         }
       }
     }
 
-    KEKPerKekID = KEKCacheEntry.getCachedItem();
+    kekPerKekID = kekCacheEntry.getCachedItem();
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Creating file key unwrapper. KeyMaterialStore: {}; token snippet: {}", 
+          keyMaterialStore, KeyToolkit.formatTokenForLog(accessToken));
+    }
   }
 
   @Override
@@ -103,9 +110,9 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
     long now = System.currentTimeMillis();
 
     if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-      synchronized (KEKMapPerToken) {
+      synchronized (KEK_MAP_PER_TOKEN) {
         if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-          KeyToolkit.removeExpiredEntriesFromCache(KEKMapPerToken);
+          KeyToolkit.removeExpiredEntriesFromCache(KEK_MAP_PER_TOKEN);
           lastKekCacheCleanupTimestamp = now;
         }
       }
@@ -144,7 +151,7 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
       String encodedKEK_ID = keyMaterialJson.get(KeyToolkit.KEK_ID_FIELD);
       final Map<String, String> keyMaterialJsonFinal = keyMaterialJson;
 
-      byte[] kekBytes = KEKPerKekID.computeIfAbsent(encodedKEK_ID,
+      byte[] kekBytes = kekPerKekID.computeIfAbsent(encodedKEK_ID,
           (k) -> unwrapKek(keyMaterialJsonFinal, masterKeyID));
 
       // Decrypt the data key
@@ -189,6 +196,10 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
     if (null == kmsClient) {
       throw new ParquetCryptoRuntimeException("KMSClient was not successfully created for reading encrypted data.");
     }
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("File unwrapper - KmsClient: {}; InstanceId: {}; InstanceURL: {}", kmsClient, kmsInstanceID, kmsInstanceURL);
+    }
     return kmsClient;
   }
 
@@ -205,14 +216,14 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
   }
 
   static void removeCacheEntriesForToken(String accessToken) {
-    synchronized (KEKMapPerToken) { 
-      KEKMapPerToken.remove(accessToken);
+    synchronized (KEK_MAP_PER_TOKEN) { 
+      KEK_MAP_PER_TOKEN.remove(accessToken);
     }
   }
 
   static void removeCacheEntriesForAllTokens() {
-    synchronized (KEKMapPerToken) {
-      KEKMapPerToken.clear();
+    synchronized (KEK_MAP_PER_TOKEN) {
+      KEK_MAP_PER_TOKEN.clear();
     }
   }
 }

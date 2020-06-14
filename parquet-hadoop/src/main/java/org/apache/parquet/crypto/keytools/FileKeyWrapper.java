@@ -32,14 +32,17 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.crypto.ParquetCryptoRuntimeException;
 import org.apache.parquet.crypto.keytools.KeyToolkit.KeyEncryptionKey;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class FileKeyWrapper {
+  private static final Logger LOG = LoggerFactory.getLogger(FileKeyWrapper.class);
 
   public static final int KEK_LENGTH = 16;
   public static final int KEK_ID_LENGTH = 16;
 
   // For every token: a map of MEK_ID to (KEK ID and KEK)
-  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, KeyEncryptionKey>>> KEKMapPerToken =
+  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, KeyEncryptionKey>>> KEK_MAP_PER_TOKEN =
       new ConcurrentHashMap<>(KeyToolkit.INITIAL_PER_TOKEN_CACHE_SIZE);
   private static volatile long lastKekCacheCleanupTimestamp = System.currentTimeMillis() + 60l * 1000; // grace period of 1 minute;
 
@@ -65,7 +68,7 @@ public class FileKeyWrapper {
     this.hadoopConfiguration = configuration;
 
     cacheEntryLifetime = 1000l * hadoopConfiguration.getLong(KeyToolkit.TOKEN_LIFETIME_PROPERTY_NAME, 
-        KeyToolkit.DEFAULT_CACHE_ENTRY_LIFETIME); 
+        KeyToolkit.DEFAULT_CACHE_ENTRY_LIFETIME_SECONDS); 
 
     kmsInstanceID = hadoopConfiguration.getTrimmed(KeyToolkit.KMS_INSTANCE_ID_PROPERTY_NAME, 
         KmsClient.DEFAULT_KMS_INSTANCE_ID);
@@ -88,19 +91,25 @@ public class FileKeyWrapper {
     if (doubleWrapping) {
       checkKekCacheForExpiredTokens();
 
-      ExpiringCacheEntry<ConcurrentMap<String, KeyEncryptionKey>> KEKCacheEntry = KEKMapPerToken.get(accessToken);
+      ExpiringCacheEntry<ConcurrentMap<String, KeyEncryptionKey>> KEKCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
       if ((null == KEKCacheEntry) || KEKCacheEntry.isExpired()) {
-        synchronized (KEKMapPerToken) {
-          KEKCacheEntry = KEKMapPerToken.get(accessToken);
+        synchronized (KEK_MAP_PER_TOKEN) {
+          KEKCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
           if ((null == KEKCacheEntry) || KEKCacheEntry.isExpired()) {
             KEKCacheEntry = new ExpiringCacheEntry<>(new ConcurrentHashMap<String, KeyEncryptionKey>(), cacheEntryLifetime);
-            KEKMapPerToken.put(accessToken, KEKCacheEntry);
+            KEK_MAP_PER_TOKEN.put(accessToken, KEKCacheEntry);
           }
         }
       }
       KEKPerMasterKeyID = KEKCacheEntry.getCachedItem();
     } else {
       KEKPerMasterKeyID = null;
+    }
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Creating file key wrapper. KmsClient: {}; KmsInstanceId: {}; KmsInstanceURL: {}; doubleWrapping: {}; "
+          + "keyMaterialStore: {}; token snippet: {}", kmsClient, kmsInstanceID, kmsInstanceURL, doubleWrapping, keyMaterialStore,
+          KeyToolkit.formatTokenForLog(accessToken));
     }
   }
 
@@ -109,14 +118,14 @@ public class FileKeyWrapper {
   }
 
   static void removeCacheEntriesForToken(String accessToken) {
-    synchronized(KEKMapPerToken) {
-      KEKMapPerToken.remove(accessToken);
+    synchronized(KEK_MAP_PER_TOKEN) {
+      KEK_MAP_PER_TOKEN.remove(accessToken);
     }
   }
 
   static void removeCacheEntriesForAllTokens() {
-    synchronized (KEKMapPerToken) {
-      KEKMapPerToken.clear();
+    synchronized (KEK_MAP_PER_TOKEN) {
+      KEK_MAP_PER_TOKEN.clear();
     }
   }
 
@@ -124,9 +133,9 @@ public class FileKeyWrapper {
     long now = System.currentTimeMillis();
 
     if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-      synchronized (KEKMapPerToken) {
+      synchronized (KEK_MAP_PER_TOKEN) {
         if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-          KeyToolkit.removeExpiredEntriesFromCache(KEKMapPerToken);
+          KeyToolkit.removeExpiredEntriesFromCache(KEK_MAP_PER_TOKEN);
           lastKekCacheCleanupTimestamp = now;
         }
       }
@@ -160,7 +169,7 @@ public class FileKeyWrapper {
       keyMaterialMap.put(KeyToolkit.KMS_INSTANCE_URL_FIELD, kmsInstanceURL);
     }
     if (null == keyMaterialStore) {
-      keyMaterialMap.put(KeyToolkit.KEY_MATERIAL_INTERNAL_STORAGE_FIELD, "true"); // TODO use/check
+      keyMaterialMap.put(KeyToolkit.KEY_MATERIAL_INTERNAL_STORAGE_FIELD, "true");
     }
     keyMaterialMap.put(KeyToolkit.DOUBLE_WRAPPING_FIELD, Boolean.toString(doubleWrapping));
     keyMaterialMap.put(KeyToolkit.MASTER_KEY_ID_FIELD, masterKeyID);
@@ -184,7 +193,7 @@ public class FileKeyWrapper {
         if (isFooterKey) {
           keyIdInFile = KeyToolkit.FOOTER_KEY_ID_IN_FILE;
         } else {
-          keyIdInFile = KeyToolkit.KEY_ID_IN_FILE_PREFIX + keyCounter;
+          keyIdInFile = KeyToolkit.COLUMN_KEY_ID_IN_FILE_PREFIX + keyCounter;
           keyCounter++;
         }
       }
