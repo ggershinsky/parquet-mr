@@ -34,13 +34,9 @@ import org.apache.parquet.hadoop.util.ConfigurationUtil;
 import org.apache.parquet.hadoop.util.HiddenFileFilter;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 public class KeyToolkit {
 
@@ -74,9 +70,8 @@ public class KeyToolkit {
   static final int INITIAL_PER_TOKEN_CACHE_SIZE = 5;
 
   // For every token: a map of KMSInstanceId to kmsClient
-  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, KmsClient>>> kmsClientCachePerToken =
-      new ConcurrentHashMap<>(INITIAL_PER_TOKEN_CACHE_SIZE);
-  private static volatile long lastKmsCacheCleanupTimestamp = System.currentTimeMillis() + 60l * 1000; // grace period of 1 minute
+  private static final TwoLevelCacheWithExpiration<String, KmsClient> kmsClientCachePerToken =
+    KmsClientCache.INSTANCE.getCache();
 
   static class KeyWithMasterID {
 
@@ -149,7 +144,7 @@ public class KeyToolkit {
 
       Set<String> fileKeyIdSet = keyMaterialStore.getKeyIDSet();
 
-      // Start with footer key (to get KMS ID, URL, if needed) 
+      // Start with footer key (to get KMS ID, URL, if needed)
       String keyMaterial = keyMaterialStore.getKeyMaterial(FOOTER_KEY_ID_IN_FILE);
       KeyWithMasterID key = fileKeyUnwrapper.getDEKandMasterID(keyMaterial);
       fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), true, FOOTER_KEY_ID_IN_FILE);
@@ -171,11 +166,9 @@ public class KeyToolkit {
 
     removeCacheEntriesForAllTokens();
   }
-  
+
   public static void removeCacheEntriesForAllTokens() {
-    synchronized (kmsClientCachePerToken) {
-      kmsClientCachePerToken.clear();
-    }
+    KmsClientCache.INSTANCE.getCache().clear();
     FileKeyWrapper.removeCacheEntriesForAllTokens();
     FileKeyUnwrapper.removeCacheEntriesForAllTokens();
   }
@@ -204,43 +197,19 @@ public class KeyToolkit {
    * @param accessToken
    */
   public static void removeCacheEntriesForToken(String accessToken) {
-    synchronized (kmsClientCachePerToken) {
-      kmsClientCachePerToken.remove(accessToken);
-    }
-
+    KmsClientCache.INSTANCE.getCache().removeCacheEntriesForToken(accessToken);
     FileKeyWrapper.removeCacheEntriesForToken(accessToken);
-
     FileKeyUnwrapper.removeCacheEntriesForToken(accessToken);
   }
 
   static void checkKmsCacheForExpiredTokens(long cacheEntryLifetime) {
-    long now = System.currentTimeMillis();
-
-    if (now > (lastKmsCacheCleanupTimestamp + cacheEntryLifetime)) {
-      synchronized (kmsClientCachePerToken) {
-        if (now > (lastKmsCacheCleanupTimestamp + cacheEntryLifetime)) {
-          removeExpiredEntriesFromCache(kmsClientCachePerToken);
-          lastKmsCacheCleanupTimestamp = now;
-        }
-      }
-    }
+    KmsClientCache.INSTANCE.getCache().checkCacheForExpiredTokens(cacheEntryLifetime);
   }
 
   static KmsClient getKmsClient(String kmsInstanceID, Configuration configuration, String accessToken, long cacheEntryLifetime) {
     // Try cache first
-    ExpiringCacheEntry<ConcurrentMap<String, KmsClient>> kmsClientCachePerTokenEntry = kmsClientCachePerToken.get(accessToken);
-    if ((null == kmsClientCachePerTokenEntry) || kmsClientCachePerTokenEntry.isExpired()) {
-      synchronized (kmsClientCachePerToken) {
-        kmsClientCachePerTokenEntry = kmsClientCachePerToken.get(accessToken);
-        if ((null == kmsClientCachePerTokenEntry) || kmsClientCachePerTokenEntry.isExpired()) {
-          ConcurrentMap<String, KmsClient> kmsClientPerToken = new ConcurrentHashMap<>();
-          kmsClientCachePerTokenEntry = new ExpiringCacheEntry<>(kmsClientPerToken, cacheEntryLifetime);
-          kmsClientCachePerToken.put(accessToken, kmsClientCachePerTokenEntry);
-        }
-      }
-    }
-
-    Map<String, KmsClient> kmsClientPerKmsInstanceCache = kmsClientCachePerTokenEntry.getCachedItem();
+    Map<String, KmsClient> kmsClientPerKmsInstanceCache =
+      kmsClientCachePerToken.getOrCreateInternalCache(accessToken, cacheEntryLifetime);
     KmsClient kmsClient =
         kmsClientPerKmsInstanceCache.computeIfAbsent(kmsInstanceID,
             (k) -> createAndInitKmsClient(kmsInstanceID, configuration, accessToken));
@@ -282,14 +251,14 @@ public class KeyToolkit {
     return (null == str) || str.isEmpty();
   }
 
-  static <E> void removeExpiredEntriesFromCache(Map<String, ExpiringCacheEntry<E>> cache) {
-    Set<Map.Entry<String, ExpiringCacheEntry<E>>> cacheEntries = cache.entrySet();
-    List<String> expiredKeys = new ArrayList<>(cacheEntries.size());
-    for (Map.Entry<String, ExpiringCacheEntry<E>> cacheEntry : cacheEntries) {
-      if (cacheEntry.getValue().isExpired()) {
-        expiredKeys.add(cacheEntry.getKey());
-      }
+  public enum KmsClientCache {
+    INSTANCE;
+
+    private final TwoLevelCacheWithExpiration<String, KmsClient> cache =
+      new TwoLevelCacheWithExpiration<>(KeyToolkit.INITIAL_PER_TOKEN_CACHE_SIZE);
+
+    public TwoLevelCacheWithExpiration<String, KmsClient> getCache() {
+      return cache;
     }
-    cache.keySet().removeAll(expiredKeys);
   }
 }

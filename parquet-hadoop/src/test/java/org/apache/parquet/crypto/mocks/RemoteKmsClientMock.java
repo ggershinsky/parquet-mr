@@ -28,12 +28,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class RemoteKmsClientMock extends RemoteKmsClient {
-  private static final byte[] FOOTER_MASTER_KEY = "0123456789012345".getBytes();
-  private static final byte[] COLUMN_MASTER_KEY1 = "1234567890123450".getBytes();
-  private static final byte[] COLUMN_MASTER_KEY2 = "1234567890123451".getBytes();
+  private static final byte[] FOOTER_MASTER_KEY = "0123456789012345".getBytes(StandardCharsets.UTF_8);
   private static final String FOOTER_MASTER_KEY_ID = "kf";
-  private static final String COLUMN_MASTER_KEY1_ID = "kc1";
-  private static final String COLUMN_MASTER_KEY2_ID = "kc2";
+  private static final byte[][] COLUMN_MASTER_KEYS = {
+    "1234567890123450".getBytes(StandardCharsets.UTF_8),
+    "1234567890123451".getBytes(StandardCharsets.UTF_8),
+    "1234567890123452".getBytes(StandardCharsets.UTF_8),
+    "1234567890123453".getBytes(StandardCharsets.UTF_8),
+    "1234567890123454".getBytes(StandardCharsets.UTF_8),
+    "1234567890123455".getBytes(StandardCharsets.UTF_8)};
+  private static final String[] COLUMN_MASTER_KEY_IDS = { "kc1", "kc2", "kc3", "kc4", "kc5", "kc6"};
   final static byte[] AAD = FOOTER_MASTER_KEY_ID.getBytes(StandardCharsets.UTF_8);
 
   private Map<String, byte[]> keyMap;
@@ -41,10 +45,14 @@ public class RemoteKmsClientMock extends RemoteKmsClient {
 
   @Override
   protected void initializeInternal() throws KeyAccessDeniedException {
-    keyMap = new HashMap<>(3);
+    keyMap = new HashMap<>(7);
     keyMap.put(FOOTER_MASTER_KEY_ID, FOOTER_MASTER_KEY);
-    keyMap.put(COLUMN_MASTER_KEY1_ID, COLUMN_MASTER_KEY1);
-    keyMap.put(COLUMN_MASTER_KEY2_ID, COLUMN_MASTER_KEY2);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[0], COLUMN_MASTER_KEYS[0]);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[1], COLUMN_MASTER_KEYS[1]);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[2], COLUMN_MASTER_KEYS[2]);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[3], COLUMN_MASTER_KEYS[3]);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[4], COLUMN_MASTER_KEYS[4]);
+    keyMap.put(COLUMN_MASTER_KEY_IDS[5], COLUMN_MASTER_KEYS[5]);
   }
 
   @Override
@@ -59,6 +67,6 @@ public class RemoteKmsClientMock extends RemoteKmsClient {
 
   @Override
   protected byte[] getMasterKeyFromServer(String masterKeyIdentifier) throws KeyAccessDeniedException, UnsupportedOperationException {
-    throw new UnsupportedOperationException();
+    return keyMap.get(masterKeyIdentifier);
   }
 }

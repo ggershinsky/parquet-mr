@@ -18,6 +18,7 @@
  */
 package org.apache.parquet.crypto.keytools.samples;
 
+import okhttp3.ConnectionSpec;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -33,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -47,7 +49,9 @@ public class VaultClient extends RemoteKmsClient {
   private static final ObjectMapper objectMapper = new ObjectMapper();
 
   private String transitEngine = DEFAULT_TRANSIT_ENGINE;
-  private OkHttpClient httpClient = new OkHttpClient();
+  private OkHttpClient httpClient = new OkHttpClient.Builder()
+    .connectionSpecs(Arrays.asList(ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS))
+    .build();
 
 
   @Override
@@ -55,7 +59,7 @@ public class VaultClient extends RemoteKmsClient {
     if (kmsToken.equals(KmsClient.DEFAULT_ACCESS_TOKEN)) {
       throw new ParquetCryptoRuntimeException("Token not provided");
     }
-    
+
     if (DEFAULT_KMS_INSTANCE_ID != kmsInstanceID) {
       transitEngine = "/v1/" + kmsInstanceID;
       if (!transitEngine.endsWith("/")) {
