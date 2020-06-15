@@ -51,7 +51,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
   
   public static final int DEK_LENGTH = 16;
 
-  private static final SecureRandom random = new SecureRandom();
+  private static final SecureRandom RANDOM = new SecureRandom();
 
   @Override
   public FileEncryptionProperties getFileEncryptionProperties(Configuration fileHadoopConfig, Path tempFilePath,
@@ -208,4 +208,3 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
         .build();
   }
 }
-
