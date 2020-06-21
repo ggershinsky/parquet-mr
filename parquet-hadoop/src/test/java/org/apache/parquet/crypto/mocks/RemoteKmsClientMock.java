@@ -57,12 +57,12 @@ public class RemoteKmsClientMock extends RemoteKmsClient {
 
   @Override
   protected String wrapKeyInServer(byte[] keyBytes, String masterKeyIdentifier) throws KeyAccessDeniedException, UnsupportedOperationException {
-    return KeyToolkit.wrapKeyLocally(keyBytes, keyMap.get(masterKeyIdentifier), AAD);
+    return KeyToolkit.encryptKeyLocally(keyBytes, keyMap.get(masterKeyIdentifier), AAD);
   }
 
   @Override
   protected byte[] unwrapKeyInServer(String wrappedKey, String masterKeyIdentifier) throws KeyAccessDeniedException, UnsupportedOperationException {
-    return KeyToolkit.unwrapKeyLocally(wrappedKey, keyMap.get(masterKeyIdentifier), AAD);
+    return KeyToolkit.decryptKeyLocally(wrappedKey, keyMap.get(masterKeyIdentifier), AAD);
   }
 
   @Override

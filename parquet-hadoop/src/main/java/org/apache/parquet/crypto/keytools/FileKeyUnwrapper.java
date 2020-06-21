@@ -137,7 +137,7 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
 
       // Decrypt the data key
       byte[]  AAD = Base64.getDecoder().decode(encodedKekID);
-      dataKey =  KeyToolkit.unwrapKeyLocally(encodedWrappedDEK, kekBytes, AAD);
+      dataKey =  KeyToolkit.decryptKeyLocally(encodedWrappedDEK, kekBytes, AAD);
     }
 
     return new KeyWithMasterID(dataKey, masterKeyID);

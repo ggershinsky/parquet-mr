@@ -46,7 +46,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
   /**
    * List of columns to encrypt, with master key IDs (see HIVE-21848).
-   * Format: “<masterKeyID>:<colName>,<colName>;<masterKeyID>:<colName>...”
+   * Format: "masterKeyID:colName,colName;masterKeyID:colName..."
    */
   public static final String COLUMN_KEYS_PROPERTY_NAME = "parquet.encryption.column.keys";
   /**
@@ -62,11 +62,10 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
    * By default, false - Parquet footers are encrypted.
    */
   public static final String PLAINTEXT_FOOTER_PROPERTY_NAME = "parquet.encryption.plaintext.footer";
-  
+
   public static final String ENCRYPTION_ALGORITHM_DEFAULT = ParquetCipher.AES_GCM_V1.toString();
   public static final boolean PLAINTEXT_FOOTER_DEFAULT = false;
 
-  private static final int DEK_LENGTH = 16;
   private static final SecureRandom RANDOM = new SecureRandom();
 
   @Override
@@ -108,11 +107,18 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
       throw new ParquetCryptoRuntimeException("Wrong encryption algorithm: " + algo);
     }
 
-    byte[] footerKeyBytes = new byte[DEK_LENGTH];
+    int dekLength = fileHadoopConfig.getInt(KeyToolkit.DATA_KEY_LENGTH_PROPERTY_NAME, 
+        KeyToolkit.DATA_KEY_LENGTH_DEFAULT);
+
+    if (dekLength != 128 && dekLength != 192 && dekLength != 256) {
+      throw new ParquetCryptoRuntimeException("Wrong data key length : " + dekLength);
+    }
+
+    byte[] footerKeyBytes = new byte[dekLength];
     RANDOM.nextBytes(footerKeyBytes);
     byte[] footerKeyMetadata = keyWrapper.getEncryptionKeyMetadata(footerKeyBytes, footerKeyId, true);
 
-    Map<ColumnPath, ColumnEncryptionProperties> encryptedColumns = getColumnEncryptionProperties(columnKeysStr, keyWrapper);
+    Map<ColumnPath, ColumnEncryptionProperties> encryptedColumns = getColumnEncryptionProperties(dekLength, columnKeysStr, keyWrapper);
 
     boolean plaintextFooter = fileHadoopConfig.getBoolean(PLAINTEXT_FOOTER_PROPERTY_NAME, PLAINTEXT_FOOTER_DEFAULT);
 
@@ -138,7 +144,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
     return propertiesBuilder.build();
   }
 
-  private Map<ColumnPath, ColumnEncryptionProperties> getColumnEncryptionProperties(String columnKeys,
+  private Map<ColumnPath, ColumnEncryptionProperties> getColumnEncryptionProperties(int dekLength, String columnKeys,
       FileKeyWrapper keyWrapper) throws ParquetCryptoRuntimeException {
     if (stringIsEmpty(columnKeys)) {
       throw new ParquetCryptoRuntimeException("No column keys configured in " + COLUMN_KEYS_PROPERTY_NAME);
@@ -179,7 +185,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
           throw new ParquetCryptoRuntimeException("Multiple keys defined for the same column: " + columnName);
         }
 
-        byte[] columnKeyBytes = new byte[DEK_LENGTH];
+        byte[] columnKeyBytes = new byte[dekLength];
         RANDOM.nextBytes(columnKeyBytes);
         byte[] columnKeyKeyMetadata =  keyWrapper.getEncryptionKeyMetadata(columnKeyBytes, columnKeyId, false);
 

@@ -23,40 +23,48 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.crypto.KeyAccessDeniedException;
 import org.apache.parquet.crypto.ParquetCryptoRuntimeException;
-import org.apache.parquet.crypto.keytools.KmsClient;
+import org.apache.parquet.crypto.keytools.RemoteKmsClient;
 import org.apache.parquet.crypto.keytools.KeyToolkit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
-public class InMemoryKMS implements KmsClient {
+/**
+ * This is a mock class, built for testing only. Don't use it as an example of KmsClient implementation.
+ * (VaultClient is the sample implementation).
+ */
+public class InMemoryKMS extends RemoteKmsClient {
   private static final Logger LOG = LoggerFactory.getLogger(InMemoryKMS.class);
 
   public static final String KEY_LIST_PROPERTY_NAME = "encryption.key.list";
-  public static final String NEW_KEY_LIST_PROPERTY_NAME = "encryption.new.key.list"; // optional, for key rotation
+  public static final String NEW_KEY_LIST_PROPERTY_NAME = "new.encryption.key.list";
 
   private Map<String,byte[]> masterKeyMap;
   private Map<String,byte[]> newMasterKeyMap;
+  
+  void startKeyRotation() {
+    String[] newMasterKeys = hadoopConfiguration.getTrimmedStrings(NEW_KEY_LIST_PROPERTY_NAME);
+    if (null == newMasterKeys || newMasterKeys.length == 0) {
+      throw new ParquetCryptoRuntimeException("No encryption key list");
+    }
+    newMasterKeyMap = parseKeyList(newMasterKeys);
+  }
+  
+  void finishKeyRotation() {
+    masterKeyMap = newMasterKeyMap;
+  }
 
   @Override
-  public void initialize(Configuration configuration, String kmsInstanceID, String kmsInstanceURL, String token) {
-
+  protected void initializeInternal() {
     // Parse master  keys
-    String[] masterKeys = configuration.getTrimmedStrings(KEY_LIST_PROPERTY_NAME);
+    String[] masterKeys = hadoopConfiguration.getTrimmedStrings(KEY_LIST_PROPERTY_NAME);
     if (null == masterKeys || masterKeys.length == 0) {
       throw new ParquetCryptoRuntimeException("No encryption key list");
     }
     masterKeyMap = parseKeyList(masterKeys);
-
-    // Parse new master keys (if available, for key rotation)
-    String[] newMasterKeys = configuration.getTrimmedStrings(NEW_KEY_LIST_PROPERTY_NAME);
-    if (null == newMasterKeys || newMasterKeys.length == 0) {
-      newMasterKeyMap = masterKeyMap;
-    } else {
-      newMasterKeyMap = parseKeyList(newMasterKeys);
-    }
+    
+    newMasterKeyMap = masterKeyMap;
   }
 
   private static Map<String, byte[]> parseKeyList(String[] masterKeys) {
@@ -82,22 +90,30 @@ public class InMemoryKMS implements KmsClient {
   }
 
   @Override
-  public String wrapKey(byte[] dataKey, String masterKeyIdentifier) {
+  protected String wrapKeyInServer(byte[] keyBytes, String masterKeyIdentifier)
+      throws KeyAccessDeniedException, UnsupportedOperationException {
     byte[] masterKey = newMasterKeyMap.get(masterKeyIdentifier);
     if (null == masterKey) {
       throw new ParquetCryptoRuntimeException("Key not found: " + masterKeyIdentifier);
     }
     byte[] AAD = masterKeyIdentifier.getBytes(StandardCharsets.UTF_8);
-    return KeyToolkit.wrapKeyLocally(dataKey, masterKey, AAD);
+    return KeyToolkit.encryptKeyLocally(keyBytes, masterKey, AAD);
   }
 
   @Override
-  public byte[] unwrapKey(String wrappedDataKey, String masterKeyIdentifier) {
+  protected byte[] unwrapKeyInServer(String wrappedKey, String masterKeyIdentifier)
+      throws KeyAccessDeniedException, UnsupportedOperationException {
     byte[] masterKey = masterKeyMap.get(masterKeyIdentifier);
     if (null == masterKey) {
       throw new ParquetCryptoRuntimeException("Key not found: " + masterKeyIdentifier);
     }
     byte[] AAD = masterKeyIdentifier.getBytes(StandardCharsets.UTF_8);
-    return KeyToolkit.unwrapKeyLocally(wrappedDataKey, masterKey, AAD);
+    return KeyToolkit.decryptKeyLocally(wrappedKey, masterKey, AAD);
+  }
+
+  @Override
+  protected byte[] getMasterKeyFromServer(String masterKeyIdentifier)
+      throws KeyAccessDeniedException, UnsupportedOperationException {
+    return newMasterKeyMap.get(masterKeyIdentifier);
   }
 }

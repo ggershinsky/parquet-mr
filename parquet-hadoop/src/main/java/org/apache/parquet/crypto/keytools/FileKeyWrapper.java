@@ -111,7 +111,7 @@ public class FileKeyWrapper {
 
       // Encrypt DEK with KEK
       byte[] AAD = keyEncryptionKey.getID();
-      encodedWrappedDEK = KeyToolkit.wrapKeyLocally(dataKey, keyEncryptionKey.getBytes(), AAD);
+      encodedWrappedDEK = KeyToolkit.encryptKeyLocally(dataKey, keyEncryptionKey.getBytes(), AAD);
       encodedKekID = keyEncryptionKey.getEncodedID();
       encodedWrappedKEK = keyEncryptionKey.getEncodedWrappedKEK();
     }

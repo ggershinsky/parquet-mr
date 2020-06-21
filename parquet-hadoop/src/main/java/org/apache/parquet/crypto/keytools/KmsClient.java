@@ -50,7 +50,7 @@ public interface KmsClient {
    * 
    * @param keyBytes: key bytes to be wrapped
    * @param masterKeyIdentifier: a string that uniquely identifies the master key in a KMS instance
-   * @return
+   * @return wrapped key
    * @throws KeyAccessDeniedException unauthorized to encrypt with the given master key
    */
   public String wrapKey(byte[] keyBytes, String masterKeyIdentifier)
@@ -64,7 +64,7 @@ public interface KmsClient {
    * 
    * @param wrappedKey String produced by wrapKey operation
    * @param masterKeyIdentifier: a string that uniquely identifies the master key in a KMS instance
-   * @return
+   * @return unwrapped key bytes
    * @throws KeyAccessDeniedException unauthorized to unwrap with the given master key
    */
   public byte[] unwrapKey(String wrappedKey, String masterKeyIdentifier)
