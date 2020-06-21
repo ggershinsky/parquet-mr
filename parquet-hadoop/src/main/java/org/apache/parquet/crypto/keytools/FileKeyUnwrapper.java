@@ -24,7 +24,6 @@ import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import org.apache.hadoop.conf.Configuration;
@@ -43,45 +42,35 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
   
   // KEK cache purpose is to minimize the Parquet-KMS interaction. Without it, each thread would have to go to KMS to unwrap a KEK. 
   // By making cache static, we provide  KEK to all threads (with the same token), if one of them has already unwrapped it.
-  private static final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, byte[]>>> KEK_MAP_PER_TOKEN = new ConcurrentHashMap<>();
-  private volatile static long lastKekCacheCleanupTimestamp = System.currentTimeMillis() + 60 * 1000; // grace period of 1 minute
+  private final TwoLevelCacheWithExpiration<String, byte[]> kekMapPerToken = KEKReadCache.INSTANCE.getCache();
+  private final long cacheCleanupPeriod;
+  private final long entryExpirationPeriod;
+
   //A map of KEK_ID to KEK - for the current token
   private final ConcurrentMap<String,byte[]> kekPerKekID;
 
-  private static final ObjectMapper objectMapper = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private KmsClient kmsClient = null;
   private final FileKeyMaterialStore keyMaterialStore;
   private final Configuration hadoopConfiguration;
-  private final long cacheEntryLifetime;
   private final String accessToken;
 
   FileKeyUnwrapper(Configuration hadoopConfiguration, FileKeyMaterialStore keyStore) {
     this.hadoopConfiguration = hadoopConfiguration;
     this.keyMaterialStore = keyStore;
 
-    cacheEntryLifetime = 1000l * hadoopConfiguration.getLong(KeyToolkit.TOKEN_LIFETIME_PROPERTY_NAME,
+    this.entryExpirationPeriod = 1000L * hadoopConfiguration.getLong(KeyToolkit.TOKEN_LIFETIME_PROPERTY_NAME,
         KeyToolkit.DEFAULT_CACHE_ENTRY_LIFETIME_SECONDS);
-
-    // Check cache upon each file reading (clean once in cacheEntryLifetime)
-    KeyToolkit.checkKmsCacheForExpiredTokens(cacheEntryLifetime);
-    checkKekCacheForExpiredTokens();
+    this.cacheCleanupPeriod = entryExpirationPeriod;
 
     accessToken = hadoopConfiguration.getTrimmed(KeyToolkit.KEY_ACCESS_TOKEN_PROPERTY_NAME, 
         KmsClient.DEFAULT_ACCESS_TOKEN);
 
-    ExpiringCacheEntry<ConcurrentMap<String, byte[]>> kekCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
-    if (null == kekCacheEntry || kekCacheEntry.isExpired()) {
-      synchronized (KEK_MAP_PER_TOKEN) {
-        kekCacheEntry = KEK_MAP_PER_TOKEN.get(accessToken);
-        if (null == kekCacheEntry || kekCacheEntry.isExpired()) {
-          kekCacheEntry = new ExpiringCacheEntry<>(new ConcurrentHashMap<String, byte[]>(), cacheEntryLifetime);
-          KEK_MAP_PER_TOKEN.put(accessToken, kekCacheEntry);
-        }
-      }
-    }
-
-    kekPerKekID = kekCacheEntry.getCachedItem();
+    // Check cache upon each file reading (clean once in cacheEntryLifetime)
+    KeyToolkit.checkKmsCacheForExpiredTokens(entryExpirationPeriod);
+    kekMapPerToken.checkCacheForExpiredTokens(cacheCleanupPeriod);
+    kekPerKekID = kekMapPerToken.getOrCreateInternalCache(accessToken, entryExpirationPeriod);
 
     if (LOG.isDebugEnabled()) {
       LOG.debug("Creating file key unwrapper. KeyMaterialStore: {}; token snippet: {}", 
@@ -106,23 +95,10 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
     return getDEKandMasterID(keyMaterial).getDataKey();
   }
 
-  private void checkKekCacheForExpiredTokens() {
-    long now = System.currentTimeMillis();
-
-    if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-      synchronized (KEK_MAP_PER_TOKEN) {
-        if (now > (lastKekCacheCleanupTimestamp + cacheEntryLifetime)) {
-          KeyToolkit.removeExpiredEntriesFromCache(KEK_MAP_PER_TOKEN);
-          lastKekCacheCleanupTimestamp = now;
-        }
-      }
-    }
-  }
-
   KeyWithMasterID getDEKandMasterID(String keyMaterial)  {
     Map<String, String> keyMaterialJson = null;
     try {
-      keyMaterialJson = objectMapper.readValue(new StringReader(keyMaterial),
+      keyMaterialJson = OBJECT_MAPPER.readValue(new StringReader(keyMaterial),
           new TypeReference<Map<String, String>>() {});
     }  catch (IOException e) {
       throw new ParquetCryptoRuntimeException("Failed to parse key material " + keyMaterial, e);
@@ -192,7 +168,7 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
       hadoopConfiguration.set(KeyToolkit.KMS_INSTANCE_URL_PROPERTY_NAME, kmsInstanceURL);
     }
 
-    KmsClient kmsClient = KeyToolkit.getKmsClient(kmsInstanceID, hadoopConfiguration, accessToken, cacheEntryLifetime);
+    KmsClient kmsClient = KeyToolkit.getKmsClient(kmsInstanceID, hadoopConfiguration, accessToken, entryExpirationPeriod);
     if (null == kmsClient) {
       throw new ParquetCryptoRuntimeException("KMSClient was not successfully created for reading encrypted data.");
     }
@@ -206,7 +182,7 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
   private static String getKeyReference(String keyReferenceMetadata) {
     Map<String, String> keyMetadataJson = null;
     try {
-      keyMetadataJson = objectMapper.readValue(new StringReader(keyReferenceMetadata),
+      keyMetadataJson = OBJECT_MAPPER.readValue(new StringReader(keyReferenceMetadata),
           new TypeReference<Map<String, String>>() {});
     } catch (Exception e) {
       throw new ParquetCryptoRuntimeException("Failed to parse key metadata " + keyReferenceMetadata, e);
@@ -216,14 +192,21 @@ public class FileKeyUnwrapper implements DecryptionKeyRetriever {
   }
 
   static void removeCacheEntriesForToken(String accessToken) {
-    synchronized (KEK_MAP_PER_TOKEN) { 
-      KEK_MAP_PER_TOKEN.remove(accessToken);
-    }
+      KEKReadCache.INSTANCE.getCache().remove(accessToken);
   }
 
   static void removeCacheEntriesForAllTokens() {
-    synchronized (KEK_MAP_PER_TOKEN) {
-      KEK_MAP_PER_TOKEN.clear();
+    KEKReadCache.INSTANCE.getCache().clear();
+  }
+
+  public enum KEKReadCache {
+    INSTANCE;
+
+    private final TwoLevelCacheWithExpiration<String, byte[]> cache =
+      new TwoLevelCacheWithExpiration<>(KeyToolkit.INITIAL_PER_TOKEN_CACHE_SIZE);
+
+    public TwoLevelCacheWithExpiration<String, byte[]> getCache() {
+      return cache;
     }
   }
 }
