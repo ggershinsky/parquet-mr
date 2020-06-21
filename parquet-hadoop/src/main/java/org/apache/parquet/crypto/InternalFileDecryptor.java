@@ -210,9 +210,9 @@ public class InternalFileDecryptor {
         throw new ParquetCryptoRuntimeException("Decryptor re-use: Different footer key metadata");
       }
     }
-    
+
     if (LOG.isDebugEnabled()) {
-      LOG.debug("File decryption - " + "Algo: " + algorithm + ". Encrypted footer: " + encryptedFooter);
+      LOG.debug("File Decryptor. Algo: {}. Encrypted footer: {}", algorithm, encryptedFooter);
     }
   }
 
@@ -248,9 +248,9 @@ public class InternalFileDecryptor {
         }
         columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, true, 
             getDataModuleDecryptor(null), getThriftModuleDecryptor(null), columnOrdinal, null);
-        
+
         if (LOG.isDebugEnabled()) {
-          LOG.debug("Column decryption (footer key): " + path);
+          LOG.debug("Column decryption (footer key): {}", path);
         }
       } else { // Column is encrypted with column-specific key
         byte[] columnKeyBytes = fileDecryptionProperties.getColumnKey(path);
@@ -267,9 +267,9 @@ public class InternalFileDecryptor {
         }
         columnDecryptionSetup = new InternalColumnDecryptionSetup(path, true, false, 
               getDataModuleDecryptor(columnKeyBytes), getThriftModuleDecryptor(columnKeyBytes), columnOrdinal, keyMetadata);
-        
+
         if (LOG.isDebugEnabled()) {
-          LOG.debug("Column decryption (column key): " + path);
+          LOG.debug("Column decryption (column key): {}", path);
         }
       }
     }

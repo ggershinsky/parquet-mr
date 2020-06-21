@@ -47,7 +47,7 @@ public class InternalFileEncryptor {
   public InternalFileEncryptor(FileEncryptionProperties fileEncryptionProperties) {
     this.fileEncryptionProperties = fileEncryptionProperties;
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Creating file encryptor - " + fileEncryptorLog());
+      fileEncryptorLog();
     }
     algorithm = fileEncryptionProperties.getAlgorithm();
     footerKey = fileEncryptionProperties.getFooterKey();
@@ -178,8 +178,8 @@ public class InternalFileEncryptor {
     }
     return (AesGcmEncryptor) ModuleCipherFactory.getEncryptor(AesMode.GCM, footerKey);
   }
-  
-  private String fileEncryptorLog() {
+
+  private void fileEncryptorLog() {
     String encryptedColumnList;
     Map<ColumnPath, ColumnEncryptionProperties> columnPropertyMap = fileEncryptionProperties.getEncryptedColumns();
     if (null != columnPropertyMap) {
@@ -190,8 +190,7 @@ public class InternalFileEncryptor {
     } else {
       encryptedColumnList = "Every column will be encrypted with footer key.";
     }
-    return "Algo: " + fileEncryptionProperties.getAlgorithm() 
-        + ". Encrypted footer: " + fileEncryptionProperties.encryptedFooter() 
-        + ".  Encrypted columns: " + encryptedColumnList;
+    LOG.debug("File Encryptor. Algo: {}. Encrypted footer: {}.  Encrypted columns: {}", 
+        fileEncryptionProperties.getAlgorithm(), fileEncryptionProperties.encryptedFooter(), encryptedColumnList);
   }
 }

@@ -34,47 +34,100 @@ import org.apache.parquet.hadoop.util.ConfigurationUtil;
 import org.apache.parquet.hadoop.util.HiddenFileFilter;
 
 import java.io.IOException;
+
 import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
-
 public class KeyToolkit {
 
-  public static final String KMS_CLIENT_CLASS_PROPERTY_NAME = "encryption.kms.client.class";
-  public static final String KMS_INSTANCE_ID_PROPERTY_NAME = "encryption.kms.instance.id";
-  public static final String DOUBLE_WRAPPING_PROPERTY_NAME = "encryption.double.wrapping";
-  public static final String KEY_ACCESS_TOKEN_PROPERTY_NAME = "encryption.key.access.token";
-  public static final String TOKEN_LIFETIME_PROPERTY_NAME = "encryption.key.access.token.lifetime";
-  public static final String KMS_INSTANCE_URL_PROPERTY_NAME = "encryption.kms.instance.url";
-  public static final String WRAP_LOCALLY_PROPERTY_NAME = "encryption.wrap.locally";
-  public static final String KEY_MATERIAL_INTERNAL_PROPERTY_NAME = "encryption.key.material.internal.storage";
-
-  static final String KEY_MATERIAL_TYPE_FIELD = "keyMaterialType";
-  static final String KEY_MATERIAL_TYPE = "PKMT1";
-  static final String KEY_MATERIAL_INTERNAL_STORAGE_FIELD = "internalStorage";
-  static final String KEY_REFERENCE_FIELD = "keyReference";
-  static final String DOUBLE_WRAPPING_FIELD = "doubleWrapping";
-
-  static final String KMS_INSTANCE_ID_FIELD = "kmsInstanceID";
-  static final String KMS_INSTANCE_URL_FIELD = "kmsInstanceURL";
-
-  static final String MASTER_KEY_ID_FIELD = "masterKeyID";
-  static final String WRAPPED_DEK_FIELD = "wrappedDEK";
-  static final String KEK_ID_FIELD = "keyEncryptionKeyID";
-  static final String WRAPPED_KEK_FIELD = "wrappedKEK";
-
-  static final String FOOTER_KEY_ID_IN_FILE = "footerKey";
-  static final String COLUMN_KEY_ID_IN_FILE_PREFIX = "columnKey";
-
-  static final long DEFAULT_CACHE_ENTRY_LIFETIME_SECONDS = 10 * 60; // 10 minutes
-  static final int INITIAL_PER_TOKEN_CACHE_SIZE = 5;
-
-  // For every token: a map of KMSInstanceId to kmsClient
-  private static final TwoLevelCacheWithExpiration<String, KmsClient> kmsClientCachePerToken =
-    KmsClientCache.INSTANCE.getCache();
+  /**
+   *  Class implementing the KmsClient interface. 
+   *  KMS stands for “key management service”.
+   */
+  public static final String KMS_CLIENT_CLASS_PROPERTY_NAME = "parquet.encryption.kms.client.class";
+  /**
+   * ID of the KMS instance that will be used for encryption (if multiple KMS instances are available).
+   */
+  public static final String KMS_INSTANCE_ID_PROPERTY_NAME = "parquet.encryption.kms.instance.id";
+  /**
+   * URL of the KMS instance.
+   */
+  public static final String KMS_INSTANCE_URL_PROPERTY_NAME = "parquet.encryption.kms.instance.url";
+  /**
+   * Authorization token that will be passed to KMS.
+   */
+  public static final String KEY_ACCESS_TOKEN_PROPERTY_NAME = "parquet.encryption.key.access.token";
+  /**
+   * Use double wrapping - where data encryption keys (DEKs) are encrypted with key encryption keys (KEKs), 
+   * which in turn are encrypted with master keys. 
+   * By default, true. If set to false, DEKs are directly encrypted with master keys, KEKs are not used.
+   * 
+   */
+  public static final String DOUBLE_WRAPPING_PROPERTY_NAME = "parquet.encryption.double.wrapping";
+  /**
+   * Lifetime of cached entities (key encryption keys, local wrapping keys, KMS client objects).
+   */
+  public static final String CACHE_LIFETIME_PROPERTY_NAME = "parquet.encryption.cache.lifetime.seconds";
+  /**
+   * Wrap keys locally - master keys are fetched from the KMS server and used to encrypt other keys (DEKs or KEKs).
+   * By default, false - key wrapping will be performed by a KMS server. 
+   */
+  public static final String WRAP_LOCALLY_PROPERTY_NAME = "parquet.encryption.wrap.locally";
+  /**
+   * Store key material inside Parquet file footers; this mode doesn’t produce additional files. 
+   * By default, true. If set to false, key material is stored in separate files in the same folder, 
+   * which enables key rotation for immutable Parquet files.
+   */
+  public static final String KEY_MATERIAL_INTERNAL_PROPERTY_NAME = "parquet.encryption.key.material.store.internally";
+  
+  public static final boolean DOUBLE_WRAPPING_DEFAULT = true;
+  public static final long CACHE_LIFETIME_DEFAULT_SECONDS = 10 * 60; // 10 minutes
+  public static final boolean WRAP_LOCALLY_DEFAULT = false;
+  public static final boolean KEY_MATERIAL_INTERNAL_DEFAULT = true;
+  
+  // KMS client two level cache: token -> KMSInstanceId -> KmsClient
+  static final TwoLevelCacheWithExpiration<KmsClient> KMS_CLIENT_CACHE_PER_TOKEN =
+     KmsClientCache.INSTANCE.getCache();
+  
+  // KEK two level cache for wrapping: token -> MEK_ID -> KeyEncryptionKey
+  static final TwoLevelCacheWithExpiration<KeyEncryptionKey> KEK_WRITE_CACHE_PER_TOKEN =
+      KEKWriteCache.INSTANCE.getCache();
+  
+  // KEK two level cache for unwrapping: token -> KEK_ID -> KEK bytes
+  static final TwoLevelCacheWithExpiration<byte[]> KEK_READ_CACHE_PER_TOKEN = 
+      KEKReadCache.INSTANCE.getCache();
+  
+  private enum KmsClientCache {
+    INSTANCE;
+    private final TwoLevelCacheWithExpiration<KmsClient> cache =
+      new TwoLevelCacheWithExpiration<>();
+    
+    private TwoLevelCacheWithExpiration<KmsClient> getCache() {
+      return cache;
+    }
+  }
+  
+  private enum KEKWriteCache {
+    INSTANCE;
+    private final TwoLevelCacheWithExpiration<KeyEncryptionKey> cache =
+      new TwoLevelCacheWithExpiration<>();
+    
+    private TwoLevelCacheWithExpiration<KeyEncryptionKey> getCache() {
+      return cache;
+    }
+  }
+  
+  private enum KEKReadCache {
+    INSTANCE;
+    private final TwoLevelCacheWithExpiration<byte[]> cache =
+      new TwoLevelCacheWithExpiration<>();
+    
+    private TwoLevelCacheWithExpiration<byte[]> getCache() {
+      return cache;
+    }
+  }
 
   static class KeyWithMasterID {
-
     private final byte[] keyBytes;
     private final String masterID ;
 
@@ -95,13 +148,12 @@ public class KeyToolkit {
   static class KeyEncryptionKey {
     private final byte[] kekBytes;
     private final byte[] kekID;
-    private final String encodedKEK_ID;
+    private  String encodedKekID;
     private final String encodedWrappedKEK;
 
-    KeyEncryptionKey(byte[] kekBytes, String encodedKEK_ID, byte[] kekID, String encodedWrappedKEK) {
+    KeyEncryptionKey(byte[] kekBytes, byte[] kekID, String encodedWrappedKEK) {
       this.kekBytes = kekBytes;
       this.kekID = kekID;
-      this.encodedKEK_ID = encodedKEK_ID;
       this.encodedWrappedKEK = encodedWrappedKEK;
     }
 
@@ -114,14 +166,28 @@ public class KeyToolkit {
     }
 
     String getEncodedID() {
-      return encodedKEK_ID;
+      if (null == encodedKekID) {
+        encodedKekID = Base64.getEncoder().encodeToString(kekID);
+      }
+      return encodedKekID;
     }
 
-    String getWrappedWithCRK() {
+    String getEncodedWrappedKEK() {
       return encodedWrappedKEK;
     }
   }
 
+  /**
+   * Key rotation. In the single wrapping mode, decrypts data keys with old master keys, then encrypts 
+   * them with new master keys. In the double wrapping mode, decrypts KEKs (key encryption keys) with old
+   * master keys, generates new KEKs and encrypts them with new master keys.
+   * Works only if key material is not stored internally in file footers.
+   * @param folderPath parent path of Parquet files, whose keys will be rotated
+   * @param hadoopConfig Hadoop configuration
+   * @throws IOException I/O problems
+   * @throws ParquetCryptoRuntimeException General parquet encryption problems
+   * @throws KeyAccessDeniedException No access to master keys
+   */
   public static void rotateMasterKeys(String folderPath, Configuration hadoopConfig)
       throws IOException, ParquetCryptoRuntimeException, KeyAccessDeniedException {
 
@@ -136,7 +202,7 @@ public class KeyToolkit {
 
       FileKeyMaterialStore keyMaterialStore = new HadoopFSKeyMaterialStore(hadoopFileSystem);
       keyMaterialStore.initialize(parquetFile, hadoopConfig, false);
-      FileKeyUnwrapper fileKeyUnwrapper = new FileKeyUnwrapper(hadoopConfig, keyMaterialStore);
+      FileKeyUnwrapper fileKeyUnwrapper = new FileKeyUnwrapper(hadoopConfig, parquetFile, keyMaterialStore);
 
       FileKeyMaterialStore tempKeyMaterialStore = new HadoopFSKeyMaterialStore(hadoopFileSystem);
       tempKeyMaterialStore.initialize(parquetFile, hadoopConfig, true);
@@ -144,16 +210,17 @@ public class KeyToolkit {
 
       Set<String> fileKeyIdSet = keyMaterialStore.getKeyIDSet();
 
-      // Start with footer key (to get KMS ID, URL, if needed)
-      String keyMaterial = keyMaterialStore.getKeyMaterial(FOOTER_KEY_ID_IN_FILE);
-      KeyWithMasterID key = fileKeyUnwrapper.getDEKandMasterID(keyMaterial);
-      fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), true, FOOTER_KEY_ID_IN_FILE);
+      // Start with footer key (to get KMS ID, URL, if needed) 
+      String keyMaterialString = keyMaterialStore.getKeyMaterial(KeyMaterial.FOOTER_KEY_ID_IN_FILE);
+      KeyWithMasterID key = fileKeyUnwrapper.getDEKandMasterID(KeyMaterial.parse(keyMaterialString));
+      fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), true, 
+          KeyMaterial.FOOTER_KEY_ID_IN_FILE);
 
-      fileKeyIdSet.remove(FOOTER_KEY_ID_IN_FILE);
+      fileKeyIdSet.remove(KeyMaterial.FOOTER_KEY_ID_IN_FILE);
       // Rotate column keys
       for (String keyIdInFile : fileKeyIdSet) {
-        keyMaterial = keyMaterialStore.getKeyMaterial(keyIdInFile);
-        key = fileKeyUnwrapper.getDEKandMasterID(keyMaterial);
+        keyMaterialString = keyMaterialStore.getKeyMaterial(keyIdInFile);
+        key = fileKeyUnwrapper.getDEKandMasterID(KeyMaterial.parse(keyMaterialString));
         fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), false, keyIdInFile);
       }
 
@@ -168,11 +235,18 @@ public class KeyToolkit {
   }
 
   public static void removeCacheEntriesForAllTokens() {
-    KmsClientCache.INSTANCE.getCache().clear();
-    FileKeyWrapper.removeCacheEntriesForAllTokens();
-    FileKeyUnwrapper.removeCacheEntriesForAllTokens();
+    KMS_CLIENT_CACHE_PER_TOKEN.clear();
+    KEK_WRITE_CACHE_PER_TOKEN.clear();
+    KEK_READ_CACHE_PER_TOKEN.clear();
   }
 
+  /**
+   * Encrypts "key" with "wrappingKey", using AES-GCM and the "AAD"
+   * @param key the key to encrypt
+   * @param wrappingKey encryption key
+   * @param AAD additional authenticated data
+   * @return base64 encoded wrapped key
+   */
   public static String wrapKeyLocally(byte[] key, byte[] wrappingKey, byte[] AAD) {
     AesGcmEncryptor keyEncryptor;
 
@@ -183,6 +257,13 @@ public class KeyToolkit {
     return Base64.getEncoder().encodeToString(wrappedKey);
   }
 
+  /**
+   * Decrypts wrapped key with "wrappingKey", using AES-GCM and the "AAD"
+   * @param encodedWrappedKey base64 encoded wrapped key
+   * @param wrappingKey encryption key
+   * @param AAD additional authenticated data
+   * @return decrypted key
+   */
   public static byte[] unwrapKeyLocally(String encodedWrappedKey, byte[] wrappingKey, byte[] AAD) {
     byte[] wrappedKEy = Base64.getDecoder().decode(encodedWrappedKey);
     AesGcmDecryptor keyDecryptor;
@@ -197,27 +278,27 @@ public class KeyToolkit {
    * @param accessToken
    */
   public static void removeCacheEntriesForToken(String accessToken) {
-    KmsClientCache.INSTANCE.getCache().removeCacheEntriesForToken(accessToken);
-    FileKeyWrapper.removeCacheEntriesForToken(accessToken);
-    FileKeyUnwrapper.removeCacheEntriesForToken(accessToken);
+    KMS_CLIENT_CACHE_PER_TOKEN.removeCacheEntriesForToken(accessToken);
+    KEK_WRITE_CACHE_PER_TOKEN.removeCacheEntriesForToken(accessToken);
+    KEK_READ_CACHE_PER_TOKEN.removeCacheEntriesForToken(accessToken);
   }
 
-  static void checkKmsCacheForExpiredTokens(long cacheEntryLifetime) {
-    KmsClientCache.INSTANCE.getCache().checkCacheForExpiredTokens(cacheEntryLifetime);
-  }
-
-  static KmsClient getKmsClient(String kmsInstanceID, Configuration configuration, String accessToken, long cacheEntryLifetime) {
-    // Try cache first
+  static KmsClient getKmsClient(String kmsInstanceID, String kmsInstanceURL, Configuration configuration, 
+      String accessToken, long cacheEntryLifetime) {
+    
     Map<String, KmsClient> kmsClientPerKmsInstanceCache =
-      kmsClientCachePerToken.getOrCreateInternalCache(accessToken, cacheEntryLifetime);
+        KMS_CLIENT_CACHE_PER_TOKEN.getOrCreateInternalCache(accessToken, cacheEntryLifetime);
+    
     KmsClient kmsClient =
         kmsClientPerKmsInstanceCache.computeIfAbsent(kmsInstanceID,
-            (k) -> createAndInitKmsClient(kmsInstanceID, configuration, accessToken));
+            (k) -> createAndInitKmsClient(configuration, kmsInstanceID, kmsInstanceURL, accessToken));
 
     return kmsClient;
   }
 
-  private static KmsClient createAndInitKmsClient(String kmsInstanceID, Configuration configuration, String accessToken) {
+  private static KmsClient createAndInitKmsClient(Configuration configuration, String kmsInstanceID, 
+      String kmsInstanceURL, String accessToken) {
+    
     Class<?> kmsClientClass = null;
     KmsClient kmsClient = null;
 
@@ -234,7 +315,7 @@ public class KeyToolkit {
           + kmsClientClass, e);
     }
 
-    kmsClient.initialize(configuration, kmsInstanceID, accessToken);
+    kmsClient.initialize(configuration, kmsInstanceID, kmsInstanceURL, accessToken);
 
     return kmsClient;
   }
@@ -249,16 +330,5 @@ public class KeyToolkit {
 
   static boolean stringIsEmpty(String str) {
     return (null == str) || str.isEmpty();
-  }
-
-  public enum KmsClientCache {
-    INSTANCE;
-
-    private final TwoLevelCacheWithExpiration<String, KmsClient> cache =
-      new TwoLevelCacheWithExpiration<>(KeyToolkit.INITIAL_PER_TOKEN_CACHE_SIZE);
-
-    public TwoLevelCacheWithExpiration<String, KmsClient> getCache() {
-      return cache;
-    }
   }
 }

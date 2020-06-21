@@ -17,8 +17,6 @@
  * under the License.
  */
 
-
-
 package org.apache.parquet.crypto.keytools;
 
 import org.apache.hadoop.conf.Configuration;
@@ -31,27 +29,25 @@ import java.util.concurrent.ConcurrentMap;
 
 import static org.apache.parquet.crypto.keytools.KeyToolkit.stringIsEmpty;
 
-
 public abstract class RemoteKmsClient implements KmsClient {
-  public static final String DEFAULT_KMS_INSTANCE_URL = "DEFAULT";
 
   protected String kmsInstanceID;
-  protected String kmsURL;
+  protected String kmsInstanceURL;
   protected String kmsToken;
   protected Boolean isWrapLocally;
   protected Configuration hadoopConfiguration;
-  private boolean isDefaultToken;
+  protected boolean isDefaultToken;
 
   private final int INITIAL_KEY_CACHE_SIZE = 10;
   // MasterKey cache: master keys per key ID (per KMS Client). For local wrapping only.
   private ConcurrentMap<String, byte[]> masterKeyCache;
 
   @Override
-  public void initialize(Configuration configuration, String kmsInstanceID, String accessToken) {
+  public void initialize(Configuration configuration, String kmsInstanceID, String kmsInstanceURL, String accessToken) {
     this.kmsInstanceID = kmsInstanceID;
-    this.kmsURL = configuration.getTrimmed(KeyToolkit.KMS_INSTANCE_URL_PROPERTY_NAME);
+    this.kmsInstanceURL = kmsInstanceURL;
 
-    this.isWrapLocally = configuration.getBoolean(KeyToolkit.WRAP_LOCALLY_PROPERTY_NAME, false);
+    this.isWrapLocally = configuration.getBoolean(KeyToolkit.WRAP_LOCALLY_PROPERTY_NAME, KeyToolkit.WRAP_LOCALLY_DEFAULT);
     if (isWrapLocally) {
       masterKeyCache = new ConcurrentHashMap<>(INITIAL_KEY_CACHE_SIZE);
     }
@@ -59,7 +55,7 @@ public abstract class RemoteKmsClient implements KmsClient {
     hadoopConfiguration = configuration;
     kmsToken = accessToken;
 
-    isDefaultToken = kmsToken.equals(KmsClient.DEFAULT_ACCESS_TOKEN);
+    isDefaultToken = kmsToken.equals(KmsClient.KEY_ACCESS_TOKEN_DEFAULT);
 
     initializeInternal();
   }

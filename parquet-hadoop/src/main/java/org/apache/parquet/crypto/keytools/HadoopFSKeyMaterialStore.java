@@ -29,7 +29,6 @@ import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.type.TypeReference;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -98,7 +97,7 @@ public class HadoopFSKeyMaterialStore implements FileKeyMaterialStore {
       loadKeyMaterialMap();
     }
 
-    return Collections.unmodifiableSet(keyMaterialMap.keySet());
+    return keyMaterialMap.keySet();
   }
 
   @Override

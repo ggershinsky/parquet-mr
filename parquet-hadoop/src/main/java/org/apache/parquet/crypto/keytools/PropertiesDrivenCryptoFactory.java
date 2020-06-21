@@ -44,13 +44,29 @@ import static org.apache.parquet.crypto.keytools.KeyToolkit.stringIsEmpty;
 public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactory, DecryptionPropertiesFactory {
   private static final Logger LOG = LoggerFactory.getLogger(PropertiesDrivenCryptoFactory.class);
 
-  public static final String COLUMN_KEYS_PROPERTY_NAME = "encryption.column.keys";
-  public static final String FOOTER_KEY_PROPERTY_NAME = "encryption.footer.key";
-  public static final String ENCRYPTION_ALGORITHM_PROPERTY_NAME = "encryption.algorithm";
-  public static final String PLAINTEXT_FOOTER_PROPERTY_NAME = "encryption.plaintext.footer";
+  /**
+   * List of columns to encrypt, with master key IDs (see HIVE-21848).
+   * Format: “<masterKeyID>:<colName>,<colName>;<masterKeyID>:<colName>...”
+   */
+  public static final String COLUMN_KEYS_PROPERTY_NAME = "parquet.encryption.column.keys";
+  /**
+   * Master key ID for footer encryption/signing.
+   */
+  public static final String FOOTER_KEY_PROPERTY_NAME = "parquet.encryption.footer.key";
+  /**
+   * Parquet encryption algorithm. Can be "AES_GCM_V1" (default), or "AES_GCM_CTR_V1".
+   */
+  public static final String ENCRYPTION_ALGORITHM_PROPERTY_NAME = "parquet.encryption.algorithm";
+  /**
+   * Write files with plaintext footer.
+   * By default, false - Parquet footers are encrypted.
+   */
+  public static final String PLAINTEXT_FOOTER_PROPERTY_NAME = "parquet.encryption.plaintext.footer";
+  
+  public static final String ENCRYPTION_ALGORITHM_DEFAULT = ParquetCipher.AES_GCM_V1.toString();
+  public static final boolean PLAINTEXT_FOOTER_DEFAULT = false;
 
-  public static final int DEK_LENGTH = 16;
-
+  private static final int DEK_LENGTH = 16;
   private static final SecureRandom RANDOM = new SecureRandom();
 
   @Override
@@ -71,7 +87,8 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
     }
 
     FileKeyMaterialStore keyMaterialStore = null;
-    boolean keyMaterialInternalStorage = fileHadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, true);
+    boolean keyMaterialInternalStorage = fileHadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, 
+        KeyToolkit.KEY_MATERIAL_INTERNAL_DEFAULT);
     if (!keyMaterialInternalStorage) {
       try {
         keyMaterialStore = new HadoopFSKeyMaterialStore(tempFilePath.getFileSystem(fileHadoopConfig));
@@ -83,7 +100,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
     FileKeyWrapper keyWrapper = new FileKeyWrapper(fileHadoopConfig, keyMaterialStore);
 
-    String algo = fileHadoopConfig.getTrimmed(ENCRYPTION_ALGORITHM_PROPERTY_NAME, ParquetCipher.AES_GCM_V1.toString());
+    String algo = fileHadoopConfig.getTrimmed(ENCRYPTION_ALGORITHM_PROPERTY_NAME, ENCRYPTION_ALGORITHM_DEFAULT);
     ParquetCipher cipher;
     try {
       cipher = ParquetCipher.valueOf(algo);
@@ -97,8 +114,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
 
     Map<ColumnPath, ColumnEncryptionProperties> encryptedColumns = getColumnEncryptionProperties(columnKeysStr, keyWrapper);
 
-    String plaintextFooterStr = fileHadoopConfig.getTrimmed(PLAINTEXT_FOOTER_PROPERTY_NAME);
-    boolean plaintextFooter = Boolean.parseBoolean(plaintextFooterStr);
+    boolean plaintextFooter = fileHadoopConfig.getBoolean(PLAINTEXT_FOOTER_PROPERTY_NAME, PLAINTEXT_FOOTER_DEFAULT);
 
     FileEncryptionProperties.Builder propertiesBuilder = FileEncryptionProperties.builder(footerKeyBytes)
         .withFooterKeyMetadata(footerKeyMetadata)
@@ -185,21 +201,10 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
   public FileDecryptionProperties getFileDecryptionProperties(Configuration hadoopConfig, Path filePath)
       throws ParquetCryptoRuntimeException {
 
-    FileKeyMaterialStore keyMaterialStore = null;
-    boolean keyMaterialInternalStorage = hadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, true);
-    if (!keyMaterialInternalStorage) {
-      try {
-        keyMaterialStore = new HadoopFSKeyMaterialStore(filePath.getFileSystem(hadoopConfig));
-        keyMaterialStore.initialize(filePath, hadoopConfig, false);
-      } catch (IOException e) {
-        throw new ParquetCryptoRuntimeException("Failed to get key material store", e);
-      }
-    }
-
-    DecryptionKeyRetriever keyRetriever = new FileKeyUnwrapper(hadoopConfig, keyMaterialStore);
+    DecryptionKeyRetriever keyRetriever = new FileKeyUnwrapper(hadoopConfig, filePath);
 
     if (LOG.isDebugEnabled()) {
-      LOG.debug("File decryption properties for {} - internal key material: {}", filePath, keyMaterialInternalStorage);
+      LOG.debug("File decryption properties for {}", filePath);
     }
 
     return FileDecryptionProperties.builder()
@@ -208,3 +213,4 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
         .build();
   }
 }
+

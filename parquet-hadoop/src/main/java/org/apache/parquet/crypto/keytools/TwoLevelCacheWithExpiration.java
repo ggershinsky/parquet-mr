@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
 package org.apache.parquet.crypto.keytools;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,28 +31,39 @@ import java.util.concurrent.ConcurrentMap;
  * @param <K> Key for the internal cache
  * @param <V> Value
  */
-public class TwoLevelCacheWithExpiration<K, V> {
+class TwoLevelCacheWithExpiration<V> {
 
-  private static final long CACHE_CLEANUP_GRACE_PERIOD = 60L * 1000; // grace period of 1 minute;
-
-  private final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<K, V>>> cache;
+  private final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, V>>> cache;
   private volatile long lastCacheCleanupTimestamp;
+  
+  static class ExpiringCacheEntry<E>  {
+    private final long expirationTimestamp;
+    private final E cachedItem;
 
-  public TwoLevelCacheWithExpiration(int initialSize) {
-    this.cache = new ConcurrentHashMap<>(initialSize);
-    this.lastCacheCleanupTimestamp = System.currentTimeMillis() + CACHE_CLEANUP_GRACE_PERIOD;
+    private ExpiringCacheEntry(E cachedItem, long expirationIntervalMillis) {
+      this.expirationTimestamp = System.currentTimeMillis() + expirationIntervalMillis;
+      this.cachedItem = cachedItem;
+    }
+    
+    private boolean isExpired() {
+      final long now = System.currentTimeMillis();
+      return (now > expirationTimestamp);
+    }
+
+    private E getCachedItem() {
+      return cachedItem;
+    }
   }
 
-  /**
-   * Create cache for the specified access token.
-   * @param accessToken
-   * @param cacheEntryLifetime should correspond to token lifetime
-   * @return
-   */
-  public ConcurrentMap<K,V> getOrCreateInternalCache(String accessToken, long cacheEntryLifetime) {
-    ExpiringCacheEntry<ConcurrentMap<K, V>> externalCacheEntry = cache.compute(accessToken, (token, cacheEntry) -> {
+  TwoLevelCacheWithExpiration() {
+    this.cache = new ConcurrentHashMap<>();
+    this.lastCacheCleanupTimestamp = System.currentTimeMillis();
+  }
+
+  ConcurrentMap<String,V> getOrCreateInternalCache(String accessToken, long cacheEntryLifetime) {
+    ExpiringCacheEntry<ConcurrentMap<String, V>> externalCacheEntry = cache.compute(accessToken, (token, cacheEntry) -> {
       if ((null == cacheEntry) || cacheEntry.isExpired()) {
-        return new ExpiringCacheEntry<>(new ConcurrentHashMap<K, V>(), cacheEntryLifetime);
+        return new ExpiringCacheEntry<>(new ConcurrentHashMap<String, V>(), cacheEntryLifetime);
       } else {
         return cacheEntry;
       }
@@ -59,11 +71,11 @@ public class TwoLevelCacheWithExpiration<K, V> {
     return externalCacheEntry.getCachedItem();
   }
 
-  public void removeCacheEntriesForToken(String accessToken) {
+  void removeCacheEntriesForToken(String accessToken) {
       cache.remove(accessToken);
   }
 
-  public void removeCacheEntriesForAllTokens() {
+  void removeCacheEntriesForAllTokens() {
       cache.clear();
   }
 
