@@ -36,12 +36,12 @@ import org.apache.parquet.hadoop.util.HiddenFileFilter;
 import java.io.IOException;
 
 import java.util.Base64;
-import java.util.Map;
 import java.util.Set;
-public class KeyToolkit {
+import java.util.concurrent.ConcurrentMap;
 
+public class KeyToolkit {
   /**
-   *  Class implementing the KmsClient interface. 
+   *  Class implementing the KmsClient interface.
    *  KMS stands for “key management service”.
    */
   public static final String KMS_CLIENT_CLASS_PROPERTY_NAME = "parquet.encryption.kms.client.class";
@@ -58,10 +58,10 @@ public class KeyToolkit {
    */
   public static final String KEY_ACCESS_TOKEN_PROPERTY_NAME = "parquet.encryption.key.access.token";
   /**
-   * Use double wrapping - where data encryption keys (DEKs) are encrypted with key encryption keys (KEKs), 
-   * which in turn are encrypted with master keys. 
+   * Use double wrapping - where data encryption keys (DEKs) are encrypted with key encryption keys (KEKs),
+   * which in turn are encrypted with master keys.
    * By default, true. If set to false, DEKs are directly encrypted with master keys, KEKs are not used.
-   * 
+   *
    */
   public static final String DOUBLE_WRAPPING_PROPERTY_NAME = "parquet.encryption.double.wrapping";
   /**
@@ -70,12 +70,12 @@ public class KeyToolkit {
   public static final String CACHE_LIFETIME_PROPERTY_NAME = "parquet.encryption.cache.lifetime.seconds";
   /**
    * Wrap keys locally - master keys are fetched from the KMS server and used to encrypt other keys (DEKs or KEKs).
-   * By default, false - key wrapping will be performed by a KMS server. 
+   * By default, false - key wrapping will be performed by a KMS server.
    */
   public static final String WRAP_LOCALLY_PROPERTY_NAME = "parquet.encryption.wrap.locally";
   /**
-   * Store key material inside Parquet file footers; this mode doesn’t produce additional files. 
-   * By default, true. If set to false, key material is stored in separate files in the same folder, 
+   * Store key material inside Parquet file footers; this mode doesn’t produce additional files.
+   * By default, true. If set to false, key material is stored in separate files in the same folder,
    * which enables key rotation for immutable Parquet files.
    */
   public static final String KEY_MATERIAL_INTERNAL_PROPERTY_NAME = "parquet.encryption.key.material.store.internally";
@@ -91,6 +91,12 @@ public class KeyToolkit {
   public static final boolean KEY_MATERIAL_INTERNAL_DEFAULT = true;
   public static final int DATA_KEY_LENGTH_DEFAULT = 128;
 
+  private static long lastCacheCleanForKeyRotationTime = 0;
+  private static Object lock = new Object();
+  // KMS servers typically allow to run key rotation once in a few hours / a day.
+  // We clean KEK writer cache (if needed) after 1 hour
+  private static final int CACHE_CLEAN_PERIOD_FOR_KEY_ROTATION = 60 * 60 * 1000; // 1 hour
+
   // KMS client two level cache: token -> KMSInstanceId -> KmsClient
   static final TwoLevelCacheWithExpiration<KmsClient> KMS_CLIENT_CACHE_PER_TOKEN =
      KmsClientCache.INSTANCE.getCache();
@@ -100,7 +106,7 @@ public class KeyToolkit {
       KEKWriteCache.INSTANCE.getCache();
 
   // KEK two level cache for unwrapping: token -> KEK_ID -> KEK bytes
-  static final TwoLevelCacheWithExpiration<byte[]> KEK_READ_CACHE_PER_TOKEN = 
+  static final TwoLevelCacheWithExpiration<byte[]> KEK_READ_CACHE_PER_TOKEN =
       KEKReadCache.INSTANCE.getCache();
 
   private enum KmsClientCache {
@@ -184,32 +190,49 @@ public class KeyToolkit {
   }
 
   /**
-   * Key rotation. In the single wrapping mode, decrypts data keys with old master keys, then encrypts 
+   * Key rotation. In the single wrapping mode, decrypts data keys with old master keys, then encrypts
    * them with new master keys. In the double wrapping mode, decrypts KEKs (key encryption keys) with old
    * master keys, generates new KEKs and encrypts them with new master keys.
    * Works only if key material is not stored internally in file footers.
    * Not supported in local key wrapping mode.
+   * Method can be run by multiple threads, but each thread must work on a different folder.
    * @param folderPath parent path of Parquet files, whose keys will be rotated
    * @param hadoopConfig Hadoop configuration
    * @throws IOException I/O problems
    * @throws ParquetCryptoRuntimeException General parquet encryption problems
    * @throws KeyAccessDeniedException No access to master keys
+   * @throws UnsupportedOperationException Master key rotation not supported for the specific hadoopConfig
    */
   public static void rotateMasterKeys(String folderPath, Configuration hadoopConfig)
-      throws IOException, ParquetCryptoRuntimeException, KeyAccessDeniedException {
+    throws IOException, ParquetCryptoRuntimeException, KeyAccessDeniedException, UnsupportedOperationException {
 
+    if (hadoopConfig.getBoolean(KEY_MATERIAL_INTERNAL_PROPERTY_NAME, KEY_MATERIAL_INTERNAL_DEFAULT)) {
+      throw new UnsupportedOperationException("Key rotation is not supported for internal key material");
+    }
     if (hadoopConfig.getBoolean(WRAP_LOCALLY_PROPERTY_NAME, WRAP_LOCALLY_DEFAULT)) {
-      throw new ParquetCryptoRuntimeException("Key rotation is not supported for local key wrapping");
+      throw new UnsupportedOperationException("Key rotation is not supported for local key wrapping");
     }
 
-    // If process wrote files with double-wrapped keys, clean KEK cache (since master keys are changing)
+    // If process wrote files with double-wrapped keys, clean KEK cache (since master keys are changing).
+    // Only once for each key rotation cycle; not for every folder
+    long currentTime = System.currentTimeMillis();
+    synchronized (lock) {
+      if (currentTime - lastCacheCleanForKeyRotationTime > CACHE_CLEAN_PERIOD_FOR_KEY_ROTATION) {
     KEK_WRITE_CACHE_PER_TOKEN.clear();
+        lastCacheCleanForKeyRotationTime = currentTime;
+      }
+    }
 
     Path parentPath = new Path(folderPath);
 
     FileSystem hadoopFileSystem = parentPath.getFileSystem(hadoopConfig);
-
+    if (!hadoopFileSystem.exists(parentPath) || !hadoopFileSystem.isDirectory(parentPath)) {
+      throw new ParquetCryptoRuntimeException("Couldn't rotate keys - folder doesn't exist or is not a directory: " + folderPath);
+    }
     FileStatus[] keyMaterialFiles = hadoopFileSystem.listStatus(parentPath, HiddenFileFilter.INSTANCE);
+    if (keyMaterialFiles.length == 0) {
+      throw new ParquetCryptoRuntimeException("Couldn't rotate keys - no parquet files in folder " + folderPath);
+    }
 
     for (FileStatus fs : keyMaterialFiles) {
       Path parquetFile = fs.getPath();
@@ -224,11 +247,11 @@ public class KeyToolkit {
 
       Set<String> fileKeyIdSet = keyMaterialStore.getKeyIDSet();
 
-      // Start with footer key (to get KMS ID, URL, if needed) 
+      // Start with footer key (to get KMS ID, URL, if needed)
       String keyMaterialString = keyMaterialStore.getKeyMaterial(KeyMaterial.FOOTER_KEY_ID_IN_FILE);
       KeyWithMasterID key = fileKeyUnwrapper.getDEKandMasterID(KeyMaterial.parse(keyMaterialString));
-      fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), true, 
-          KeyMaterial.FOOTER_KEY_ID_IN_FILE);
+      fileKeyWrapper.getEncryptionKeyMetadata(key.getDataKey(), key.getMasterID(), true,
+        KeyMaterial.FOOTER_KEY_ID_IN_FILE);
 
       fileKeyIdSet.remove(KeyMaterial.FOOTER_KEY_ID_IN_FILE);
       // Rotate column keys
@@ -243,7 +266,7 @@ public class KeyToolkit {
       keyMaterialStore.removeMaterial();
 
       tempKeyMaterialStore.moveMaterialTo(keyMaterialStore);
-    }
+      }
   }
 
   /**
@@ -296,12 +319,11 @@ public class KeyToolkit {
     return keyDecryptor.decrypt(encryptedKey, 0, encryptedKey.length, AAD);
   }
 
-  static KmsClient getKmsClient(String kmsInstanceID, String kmsInstanceURL, Configuration configuration, 
+  static KmsClient getKmsClient(String kmsInstanceID, String kmsInstanceURL, Configuration configuration,
       String accessToken, long cacheEntryLifetime) {
-    
-    Map<String, KmsClient> kmsClientPerKmsInstanceCache =
+    ConcurrentMap<String, KmsClient> kmsClientPerKmsInstanceCache =
         KMS_CLIENT_CACHE_PER_TOKEN.getOrCreateInternalCache(accessToken, cacheEntryLifetime);
-    
+
     KmsClient kmsClient =
         kmsClientPerKmsInstanceCache.computeIfAbsent(kmsInstanceID,
             (k) -> createAndInitKmsClient(configuration, kmsInstanceID, kmsInstanceURL, accessToken));
@@ -309,9 +331,9 @@ public class KeyToolkit {
     return kmsClient;
   }
 
-  private static KmsClient createAndInitKmsClient(Configuration configuration, String kmsInstanceID, 
+  private static KmsClient createAndInitKmsClient(Configuration configuration, String kmsInstanceID,
       String kmsInstanceURL, String accessToken) {
-    
+
     Class<?> kmsClientClass = null;
     KmsClient kmsClient = null;
 

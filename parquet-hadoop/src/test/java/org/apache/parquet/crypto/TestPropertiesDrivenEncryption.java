@@ -19,10 +19,11 @@
 package org.apache.parquet.crypto;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.crypto.keytools.KeyToolkit;
 import org.apache.parquet.crypto.keytools.PropertiesDrivenCryptoFactory;
-import org.apache.parquet.crypto.mocks.RemoteKmsClientMock;
+import org.apache.parquet.crypto.keytools.mocks.InMemoryKMS;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetReader;
@@ -41,7 +42,9 @@ import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,6 +57,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.parquet.hadoop.ParquetFileWriter.EFMAGIC;
+import static org.apache.parquet.hadoop.ParquetFileWriter.EF_MAGIC_STR;
+import static org.apache.parquet.hadoop.ParquetFileWriter.MAGIC;
 import static org.apache.parquet.hadoop.ParquetFileWriter.Mode.OVERWRITE;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 
@@ -211,7 +217,7 @@ public class TestPropertiesDrivenEncryption {
       public Configuration getHadoopConfiguration(TestPropertiesDrivenEncryption test) {
         Configuration conf = getCryptoProperties(test);
         setEncryptionKeys(conf);
-        conf.setBoolean("encryption.plaintext.footer", true);
+        conf.setBoolean(PropertiesDrivenCryptoFactory.PLAINTEXT_FOOTER_PROPERTY_NAME, true);
         return conf;
       }
     },
@@ -223,7 +229,8 @@ public class TestPropertiesDrivenEncryption {
       public Configuration getHadoopConfiguration(TestPropertiesDrivenEncryption test) {
         Configuration conf = getCryptoProperties(test);
         setEncryptionKeys(conf);
-        conf.set("encryption.algorithm", "AES_GCM_CTR_V1");
+        conf.set(PropertiesDrivenCryptoFactory.ENCRYPTION_ALGORITHM_PROPERTY_NAME,
+          ParquetCipher.AES_GCM_CTR_V1.toString());
         return conf;
       }
     },
@@ -269,7 +276,11 @@ public class TestPropertiesDrivenEncryption {
     Configuration conf = new Configuration();
     conf.set(EncryptionPropertiesFactory.CRYPTO_FACTORY_CLASS_PROPERTY_NAME,
       PropertiesDrivenCryptoFactory.class.getName());
-    conf.set(KeyToolkit.KMS_CLIENT_CLASS_PROPERTY_NAME, RemoteKmsClientMock.class.getName());
+
+    conf.set(KeyToolkit.KMS_CLIENT_CLASS_PROPERTY_NAME, InMemoryKMS.class.getName());
+    conf.set(InMemoryKMS.KEY_LIST_PROPERTY_NAME, KEY_LIST);
+    conf.set(InMemoryKMS.NEW_KEY_LIST_PROPERTY_NAME, NEW_KEY_LIST);
+
     conf.setBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, test.isKeyMaterialInternalStorage);
     conf.setBoolean(KeyToolkit.DOUBLE_WRAPPING_PROPERTY_NAME, test.isDoubleWrapping);
     conf.setBoolean(KeyToolkit.WRAP_LOCALLY_PROPERTY_NAME, test.isWrapLocally);
@@ -280,8 +291,8 @@ public class TestPropertiesDrivenEncryption {
    * Set configuration properties to encrypt columns and the footer with different keys
    */
   private static void setEncryptionKeys(Configuration conf) {
-    conf.set("encryption.column.keys", COLUMN_KEY_MAPPING);
-    conf.set("encryption.footer.key", FOOTER_MASTER_KEY_ID);
+    conf.set(PropertiesDrivenCryptoFactory.COLUMN_KEYS_PROPERTY_NAME, COLUMN_KEY_MAPPING);
+    conf.set(PropertiesDrivenCryptoFactory.FOOTER_KEY_PROPERTY_NAME, FOOTER_MASTER_KEY_ID);
   }
 
 
@@ -289,8 +300,9 @@ public class TestPropertiesDrivenEncryption {
   public void testWriteReadEncryptedParquetFiles() throws IOException {
     Path rootPath = new Path(temporaryFolder.getRoot().getPath());
     LOG.info("======== testWriteReadEncryptedParquetFiles {} ========", rootPath.toString());
-    LOG.info("Run: isKeyMaterialExternalStorage={} isDoubleWrapping={} isWrapLocally={}",
+    LOG.info("Run: isKeyMaterialInternalStorage={} isDoubleWrapping={} isWrapLocally={}",
       isKeyMaterialInternalStorage, isDoubleWrapping, isWrapLocally);
+    KeyToolkit.removeCacheEntriesForAllTokens();
     ExecutorService threadPool = Executors.newFixedThreadPool(NUM_THREADS);
     try {
       // Write using various encryption configurations.
@@ -306,12 +318,20 @@ public class TestPropertiesDrivenEncryption {
   private void testWriteEncryptedParquetFiles(Path root, List<SingleRow> data, ExecutorService threadPool) throws IOException {
     EncryptionConfiguration[] encryptionConfigurations = EncryptionConfiguration.values();
     for (EncryptionConfiguration encryptionConfiguration : encryptionConfigurations) {
+      Path encryptionConfigurationFolderPath = new Path(root, encryptionConfiguration.name());
+      Configuration conf = new Configuration();
+      FileSystem fs = encryptionConfigurationFolderPath.getFileSystem(conf);
+      if (fs.exists(encryptionConfigurationFolderPath)) {
+        fs.delete(encryptionConfigurationFolderPath, true);
+      }
+      fs.mkdirs(encryptionConfigurationFolderPath);
+
       KeyToolkit.removeCacheEntriesForAllTokens();
       CountDownLatch latch = new CountDownLatch(NUM_THREADS);
       for (int i = 0; i < NUM_THREADS; ++i) {
         final int threadNumber = i;
         threadPool.execute(() -> {
-          writeEncryptedParquetFile(root, data, encryptionConfiguration, threadNumber);
+          writeEncryptedParquetFile(encryptionConfigurationFolderPath, data, encryptionConfiguration, threadNumber);
           latch.countDown();
         });
       }
@@ -376,27 +396,69 @@ public class TestPropertiesDrivenEncryption {
 
   private Path getFileName(Path root, EncryptionConfiguration encryptionConfiguration, int threadNumber) {
     String suffix = (EncryptionConfiguration.NO_ENCRYPTION == encryptionConfiguration) ? ".parquet" : ".parquet.encrypted";
-    return new Path(root, encryptionConfiguration.toString() + threadNumber + suffix);
+    return new Path(root, encryptionConfiguration.toString() + "_" + threadNumber + suffix);
   }
 
-  private void testReadEncryptedParquetFiles(Path root, List<SingleRow> data, ExecutorService threadPool) {
+  private void testReadEncryptedParquetFiles(Path root, List<SingleRow> data, ExecutorService threadPool) throws IOException {
+    readFilesMultithreaded(root, data, threadPool, false/*keysRotated*/);
+
+    LOG.info("--> Start master key rotation");
+    Configuration hadoopConfigForRotation =
+      EncryptionConfiguration.ENCRYPT_COLUMNS_AND_FOOTER.getHadoopConfiguration(this);
+    hadoopConfigForRotation.set(InMemoryKMS.NEW_KEY_LIST_PROPERTY_NAME, NEW_KEY_LIST);
+    InMemoryKMS.startKeyRotation(hadoopConfigForRotation);
+
+    EncryptionConfiguration[] encryptionConfigurations = EncryptionConfiguration.values();
+    for (EncryptionConfiguration encryptionConfiguration : encryptionConfigurations) {
+      if (EncryptionConfiguration.NO_ENCRYPTION == encryptionConfiguration) {
+        continue; // no rotation of plaintext files
+      }
+      Path encryptionConfigurationFolderPath = new Path(root, encryptionConfiguration.name());
+      try {
+        LOG.info("Rotate master keys in folder: "  + encryptionConfigurationFolderPath.toString());
+        KeyToolkit.rotateMasterKeys(encryptionConfigurationFolderPath.toString(), hadoopConfigForRotation);
+      } catch (UnsupportedOperationException e) {
+        if (isKeyMaterialInternalStorage || isWrapLocally) {
+          LOG.info("Key material file not found, as expected");
+        } else {
+          errorCollector.addError(e);
+        }
+        return; // No use in continuing reading if rotation wasn't successful
+      } catch (Exception e) {
+        errorCollector.addError(e);
+        return; // No use in continuing reading if rotation wasn't successful
+      }
+    }
+
+    InMemoryKMS.finishKeyRotation();
+    LOG.info("--> Finish master key rotation");
+
+    LOG.info("--> Read files again with new keys");
+    readFilesMultithreaded(root, data, threadPool, true /*keysRotated*/);
+  }
+
+  private void readFilesMultithreaded(Path root, List<SingleRow> data, ExecutorService threadPool, boolean keysRotated) {
     DecryptionConfiguration[] decryptionConfigurations = DecryptionConfiguration.values();
     for (DecryptionConfiguration decryptionConfiguration : decryptionConfigurations) {
       LOG.info("\n\n");
       LOG.info("==> Decryption configuration {}\n", decryptionConfiguration);
+      Configuration hadoopConfig = decryptionConfiguration.getHadoopConfiguration(this);
+      if (null != hadoopConfig) {
+        KeyToolkit.removeCacheEntriesForAllTokens();
+      }
 
       EncryptionConfiguration[] encryptionConfigurations = EncryptionConfiguration.values();
       for (EncryptionConfiguration encryptionConfiguration : encryptionConfigurations) {
-        Configuration hadoopConfig = decryptionConfiguration.getHadoopConfiguration(this);
+        Path encryptionConfigurationFolderPath = new Path(root, encryptionConfiguration.name());
 
-        KeyToolkit.removeCacheEntriesForAllTokens();
         CountDownLatch latch = new CountDownLatch(NUM_THREADS);
         for (int i = 0; i < NUM_THREADS; ++i) {
           final int threadNumber = i;
           threadPool.execute(() -> {
-            Path file = getFileName(root, encryptionConfiguration, threadNumber);
+            Path file = getFileName(encryptionConfigurationFolderPath, encryptionConfiguration, threadNumber);
             LOG.info("--> Read file {} {}", file.toString(), encryptionConfiguration);
-            readFileAndCheckResult(hadoopConfig, encryptionConfiguration, decryptionConfiguration, data, file);
+            readFileAndCheckResult(hadoopConfig, encryptionConfiguration, decryptionConfiguration,
+              data, file, keysRotated);
 
             latch.countDown();
           });
@@ -412,7 +474,7 @@ public class TestPropertiesDrivenEncryption {
 
   private void readFileAndCheckResult(Configuration hadoopConfig, EncryptionConfiguration encryptionConfiguration,
                                       DecryptionConfiguration decryptionConfiguration,
-                                      List<SingleRow> data, Path file) {
+                                      List<SingleRow> data, Path file, boolean keysRotated) {
     FileDecryptionProperties fileDecryptionProperties = null;
     if (null == hadoopConfig) {
       hadoopConfig = new Configuration();
@@ -427,6 +489,25 @@ public class TestPropertiesDrivenEncryption {
       hadoopConfig.set("parquet.read.schema", Types.buildMessage()
         .optional(INT32).named(SingleRow.PLAINTEXT_INT32_FIELD_NAME)
         .named("FormatTestObject").toString());
+    }
+    if ((encryptionConfiguration != EncryptionConfiguration.NO_ENCRYPTION) &&
+      (encryptionConfiguration != EncryptionConfiguration.ENCRYPT_COLUMNS_PLAINTEXT_FOOTER)) {
+      byte[] magic = new byte[MAGIC.length];
+      try (InputStream is = new FileInputStream(file.toString())) {
+        if (is.read(magic) != magic.length) {
+          throw new RuntimeException("ERROR");
+        }
+        if (!Arrays.equals(EFMAGIC, magic)) {
+          addErrorToErrorCollectorAndLog("File doesn't start with " + EF_MAGIC_STR, encryptionConfiguration, decryptionConfiguration);
+        }
+      } catch (IOException e) {
+        addErrorToErrorCollectorAndLog("Failed to read magic string at the beginning of file", e,
+          encryptionConfiguration, decryptionConfiguration);
+      }
+    }
+
+    if (keysRotated && (null != hadoopConfig.get(InMemoryKMS.KEY_LIST_PROPERTY_NAME))) {
+      hadoopConfig.set(InMemoryKMS.KEY_LIST_PROPERTY_NAME, NEW_KEY_LIST);
     }
 
     int rowNum = 0;
@@ -519,7 +600,7 @@ public class TestPropertiesDrivenEncryption {
     if (!file.endsWith(".parquet.encrypted")) {
       return null;
     }
-    String fileNamePrefix = file.replaceFirst("(.*)[0-9]+.parquet.encrypted", "$1");;
+    String fileNamePrefix = file.replaceFirst("(.*)_[0-9]+.parquet.encrypted", "$1");;
     try {
       EncryptionConfiguration encryptionConfiguration = EncryptionConfiguration.valueOf(fileNamePrefix.toUpperCase());
       return encryptionConfiguration;

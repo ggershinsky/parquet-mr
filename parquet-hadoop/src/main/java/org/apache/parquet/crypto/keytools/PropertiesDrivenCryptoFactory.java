@@ -21,8 +21,11 @@ package org.apache.parquet.crypto.keytools;
 
 import java.io.IOException;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -43,6 +46,9 @@ import static org.apache.parquet.crypto.keytools.KeyToolkit.stringIsEmpty;
 
 public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactory, DecryptionPropertiesFactory {
   private static final Logger LOG = LoggerFactory.getLogger(PropertiesDrivenCryptoFactory.class);
+  private static final Integer[] ACCEPTABLE_DATA_KEY_LENGTHS = {128, 192, 256};
+  private static final Set<Integer> ACCEPTABLE_DATA_KEY_LENGTHS_SET =
+    new HashSet<>(Arrays.asList(ACCEPTABLE_DATA_KEY_LENGTHS));
 
   /**
    * List of columns to encrypt, with master key IDs (see HIVE-21848).
@@ -86,7 +92,7 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
     }
 
     FileKeyMaterialStore keyMaterialStore = null;
-    boolean keyMaterialInternalStorage = fileHadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME, 
+    boolean keyMaterialInternalStorage = fileHadoopConfig.getBoolean(KeyToolkit.KEY_MATERIAL_INTERNAL_PROPERTY_NAME,
         KeyToolkit.KEY_MATERIAL_INTERNAL_DEFAULT);
     if (!keyMaterialInternalStorage) {
       try {
@@ -107,13 +113,14 @@ public class PropertiesDrivenCryptoFactory implements EncryptionPropertiesFactor
       throw new ParquetCryptoRuntimeException("Wrong encryption algorithm: " + algo);
     }
 
-    int dekLength = fileHadoopConfig.getInt(KeyToolkit.DATA_KEY_LENGTH_PROPERTY_NAME, 
+    int dekLengthBits = fileHadoopConfig.getInt(KeyToolkit.DATA_KEY_LENGTH_PROPERTY_NAME,
         KeyToolkit.DATA_KEY_LENGTH_DEFAULT);
 
-    if (dekLength != 128 && dekLength != 192 && dekLength != 256) {
-      throw new ParquetCryptoRuntimeException("Wrong data key length : " + dekLength);
+    if (!ACCEPTABLE_DATA_KEY_LENGTHS_SET.contains(dekLengthBits)) {
+      throw new ParquetCryptoRuntimeException("Wrong data key length : " + dekLengthBits);
     }
 
+    int dekLength = dekLengthBits / 8 ;
     byte[] footerKeyBytes = new byte[dekLength];
     RANDOM.nextBytes(footerKeyBytes);
     byte[] footerKeyMetadata = keyWrapper.getEncryptionKeyMetadata(footerKeyBytes, footerKeyId, true);

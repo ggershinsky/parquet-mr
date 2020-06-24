@@ -24,18 +24,17 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * Concurrent two-level cache with expiration of internal caches according to token lifetime.
- * External cache is per token, internal is per K.
+ * External cache is per token, internal is per String key.
  * Wrapper class around:
- *   ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<K, V>>>
+ *   ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, V>>>
  *
- * @param <K> Key for the internal cache
  * @param <V> Value
  */
 class TwoLevelCacheWithExpiration<V> {
 
   private final ConcurrentMap<String, ExpiringCacheEntry<ConcurrentMap<String, V>>> cache;
   private volatile long lastCacheCleanupTimestamp;
-  
+
   static class ExpiringCacheEntry<E>  {
     private final long expirationTimestamp;
     private final E cachedItem;
@@ -44,7 +43,7 @@ class TwoLevelCacheWithExpiration<V> {
       this.expirationTimestamp = System.currentTimeMillis() + expirationIntervalMillis;
       this.cachedItem = cachedItem;
     }
-    
+
     private boolean isExpired() {
       final long now = System.currentTimeMillis();
       return (now > expirationTimestamp);

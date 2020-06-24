@@ -39,6 +39,9 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * An example of KmsClient implementation. Not for production use!
+ */
 public class VaultClient extends RemoteKmsClient {
   private static final Logger LOG = LoggerFactory.getLogger(VaultClient.class);
   private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
@@ -59,24 +62,24 @@ public class VaultClient extends RemoteKmsClient {
     if (isDefaultToken) {
       throw new ParquetCryptoRuntimeException("Vault token not provided");
     }
-    
+
     if (kmsInstanceURL.equals(KmsClient.KMS_INSTANCE_URL_DEFAULT)) {
       throw new ParquetCryptoRuntimeException("Vault URL not provided");
     }
-    
+
     if (!kmsInstanceURL.endsWith("/")) {
       kmsInstanceURL += "/";
     }
-    
+
     String transitEngine = DEFAULT_TRANSIT_ENGINE;
-    
+
     if (!kmsInstanceID.equals(KmsClient.KMS_INSTANCE_ID_DEFAULT)) {
       transitEngine = "/v1/" + kmsInstanceID;
       if (!transitEngine.endsWith("/")) {
         transitEngine += "/";
       }
     }
-    
+
     endPointPrefix = kmsInstanceURL + transitEngine;
   }
 
